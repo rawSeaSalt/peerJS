@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stone Thrower Multiplayer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; }
+        
+        #ui-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.7); z-index: 10;
+        }
+        .menu {
+            background: #333; color: white; padding: 20px; border-radius: 10px;
+            text-align: center; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        input { padding: 10px; margin: 10px; border-radius: 5px; border: none; }
+        button { padding: 10px 20px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; }
+        
+        #game-hud {
+            position: absolute; top: 10px; left: 10px; z-index: 5;
+            color: white; pointer-events: none;
+        }
+        #menu-toggle {
+            position: absolute; top: 10px; right: 10px; z-index: 5;
+            width: 40px; height: 40px; background: #44Since a full multiplayer implementation with synchronized physics is extremely large, I have provided a robust, single-file framework. This code implements the **PixiJS** rendering, **Matter.js** physics, and **PeerJS** networking logic.
+
+**Key Technical Note:** In peer-to-peer physics, one player must act as the "Host" to prevent desync. In this version, the Host simulates the world and sends positions to the Guest.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stone Thrower Multiplayer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .interactive { pointer-events: auto; }
+        
+        #menu { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(40, 40, 40, 0.95); color: white; padding: 30px; 
+            border-radius: 15px; text-align: center; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        input { padding: 10px; margin: 10px; border-radius: 5px; border: none; width: 200px; }
+        button { padding: 10px 20px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px; font-weight: bold; margin: 5px; }
+        
+        #hud { position: absolute; top: 20px; left: 20px; color: white; font-size: 18px; text-shadow: 2px 2px 2px black; }
+        #settings-btn { position: absolute; top: 20px; right: 20px; width: 50px; height: 50px; border-radius: 25px; background: #444; color: white; border: 2px solid #666; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="hud">Connecting...</div>
+        <button id="settings-btn" class="interactive">⚙️</button>
+        
+        <div id="menu" class="interactive">
+            <h1>STONE THROWER</h1>
+            <div id="setup-box">
+                <button onclick="createRoom()">Create Room</button>
+                <div style="margin: 20px 0;">
+                    <input type="text" id="room-id-input" placeholder="Enter Room ID">
+                    <button onclick="joinRoom()">Join Room</button>
+                </div>
+            </div>
+            <p id="status-text">Ready to play</p>
+        </div>
+    </div>
+
+<script>
+/** GAME CONFIGURATION **/
+const WORLD\_SIZE = 3600;
+const PLAYER\_RADIUS = 30;
+const STONE\_RADIUS = 12;
+const MOVE\_SPEED = 0.005;
+const THROW\_FORCE = 0.04;
+
+/** GLOBALS **/
+let app, engine, render, world, peer, conn;
+let localPlayer, remotePlayer, stones = [];
+let isHost = false, isConnected = false;
+let joystick = { active: false, startX: 0, startY: 0, curX: 0, curY: 0 };
+let isHoldingStone = false, heldStone = null;
+let aimLine;
+
+// Audio
+const sfx = {
+    throw: new Howl({ src: ['https://assets.mixkit.co/active\_storage/sfx/2571/2571-preview.mp3'] }),
+    hit: new Howl({ src: ['https://assets.mixkit.co/active\_storage/sfx/2568/2568-preview.mp3'] })
+};
+
+/** INITIALIZATION **/
+async function initGame() {
+    app = new PIXI.Application({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        backgroundColor: 0x2d5a27,
+        antialias: true
+    });
+    document.body.appendChild(app.view);
+
+    // Setup Matter.js
+    engine = Matter.Engine.create();
+    world = engine.world;
+    world.gravity.y = 0; // Top-down view
+
+    // World Boundaries
+    Matter.World.add(world, [
+        Matter.Bodies.rectangle(WORLD\_SIZE/2, 0, WORLD\_SIZE, 40, { isStatic: true }),
+        Matter.Bodies.rectangle(WORLD\_SIZE/2, WORLD\_SIZE, WORLD\_SIZE, 40, { isStatic: true }),
+        Matter.Bodies.rectangle(0, WORLD\_SIZE/2, 40, WORLD\_SIZE, { isStatic: true }),
+        Matter.Bodies.rectangle(WORLD\_SIZE, WORLD\_SIZE/2, 40, WORLD\_SIZE, { isStatic: true }),
+    ]);
+
+    // Add random obstacles
+    for(let i=0; i<40; i++) {
+        const x = Math.random() * WORLD\_SIZE;
+        const y = Math.random() * WORLD\_SIZE;
+        const w = 50 + Math.random() * 200;
+        const h = 50 + Math.random() * 200;
+        Matter.World.add(world, Matter.Bodies.rectangle(x, y, w, h, { isStatic: true, render: { fillStyle: '#555' }}));
+        
+        // Draw obstacle in Pixi
+        const rect = new PIXI.Graphics().beginFill(0x555555).drawRect(-w/2, -h/2, w, h).endFill();
+        rect.x = x; rect.y = y;
+        app.stage.addChild(rect);
+    }
+
+    // Add stones
+    for(let i=0; i<30; i++) {
+        spawnStone(Math.random() * WORLD\_SIZE, Math.random() * WORLD\_SIZE);
+    }
+
+    // Aim Line
+    aimLine = new PIXI.Graphics();
+    app.stage.addChild(aimLine);
+
+    // Viewport container to handle 3600x3600 map
+    const gameContainer = new PIXI.Container();
+    app.stage.addChild(gameContainer);
+    app.viewport = gameContainer;
+
+    // Game Loop
+    app.ticker.add(() => {
+        Matter.Engine.update(engine, 1000/60);
+        updatePlayers();
+        updateCamera();
+        updateStones();
+        if(isHost && isConnected) broadcastState();
+    });
+
+    setupControls();
+}
+
+function spawnStone(x, y) {
+    const body = Matter.Bodies.circle(x, y, STONE\_RADIUS, { 
+        restitution: 0.5, frictionAir: 0.05, density: 0.01 
+    });
+    Matter.World.add(world, body);
+    
+    const graphic = new PIXI.Graphics().beginFill(0x888888).drawCircle(0, 0, STONE\_RADIUS).endFill();
+    app.viewport.addChild(graphic);
+    stones.push({ body, graphic });
+}
+
+/** MULTIPLAYER LOGIC **/
+function createRoom() {
+    isHost = true;
+    peer = new Peer();
+    peer.on('open', id => {
+        document.getElementById('status-text').innerText = "Room ID: " + id;
+        document.getElementById('setup-box').innerHTML = `<p>Share this ID: <b>${id}</b></p>`;
+    });
+    peer.on('connection', conn => {
+        conn.on('data', data => handleData(data));
+        conn.on('open', () => {
+            isConnected = true;
+            conn = conn;
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('hud').innerText = "Host: Player 1";
+            setupPlayers();
+        });
+    });
+}
+
+function joinRoom() {
+    const id = document.getElementById('room-id-input').value;
+    if(!id) return;
+    isHost = false;
+    peer = new Peer();
+    peer.on('open', () => {
+        conn = peer.connect(id);
+        conn.on('data', data => handleData(data));
+        conn.on('open', () => {
+            isConnected = true;
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('hud').innerText = "Guest: Player 2";
+            setupPlayers();
+        });
+    });
+}
+
+function setupPlayers() {
+    localPlayer = createPlayerBody(isHost ? 500 : 3000, isHost ? 500 : 3000, 0x3498db);
+    remotePlayer = createPlayerBody(isHost ? 3000 : 500, isHost ? 3000 : 500, 0xe74c3c);
+}
+
+function createPlayerBody(x, y, color) {
+    const body = Matter.Bodies.circle(x, y, PLAYER\_RADIUS, { frictionAir: 0.1 });
+    Matter.World.add(world, body);
+    const graphic = new PIXI.Graphics().beginFill(color).drawCircle(0, 0, PLAYER\_RADIUS).endFill();
+    app.viewport.addChild(graphic);
+    return { body, graphic };
+}
+
+function broadcastState() {
+    const state = {
+        p1: { x: localPlayer.body.position.x, y: localPlayer.body.position.y },
+        p2: { x: remotePlayer.body.position.x, y: remotePlayer.body.position.y },
+        stones: stones.map(s => ({ x: s.body.position.x, y: s.body.position.y, vx: s.body.velocity.x, vy: s.body.velocity.y }))
+    };
+    conn.send(state);
+}
+
+function handleData(data) {
+    if(!isHost) {
+        Matter.Body.setPosition(localPlayer.body, { x: data.p2.x, y: data.p2.y });
+        Matter.Body.setPosition(remotePlayer.body, { x: data.p1.x, y: data.p1.y });
+        data.stones.forEach((s, i) => {
+            if(stones[i]) {
+                Matter.Body.setPosition(stones[i].body, { x: s.x, y: s.y });
+                Matter.Body.setVelocity(stones[i].body, { x: s.vx, y: s.vy });
+            }
+        });
+    }
+}
+
+/** GAMEPLAY LOGIC **/
+function updatePlayers() {
+    if(!localPlayer) return;
+    
+    // Movement via joystick
+    if(joystick.active) {
+        const dx = joystick.curX - joystick.startX;
+        const dy = joystick.curY - joystick.startY;
+        const angle = Math.atan2(dy, dx);
+        Matter.Body.applyForce(localPlayer.body, localPlayer.body.position, {
+            x: Math.cos(angle) * MOVE\_SPEED,
+            y: Math.sin(angle) * MOVE\_SPEED
+        });
+    }
+
+    localPlayer.graphic.x = localPlayer.body.position.x;
+    localPlayer.graphic.y = localPlayer.body.position.y;
+    remotePlayer.graphic.x = remotePlayer.body.position.x;
+    remotePlayer.graphic.y = remotePlayer.body.position.y;
+
+    // Stone Pickup Logic
+    if(!isHoldingStone) {
+        stones.forEach(s => {
+            const dist = Matter.Vector.magnitude(Matter.Vector.sub(localPlayer.body.position, s.body.position));
+            if(dist < PLAYER\_RADIUS + STONE\_RADIUS + 10) {
+                isHoldingStone = true;
+                heldStone = s;
+                Matter.Body.setStatic(s.body, true);
+            }
+        });
+    } else {
+        heldStone.body.position = { ...localPlayer.body.position };
+        heldStone.graphic.x = heldStone.body.position.x;
+        heldStone.graphic.y = heldStone.body.position.y;
+        drawAimLine();
+    }
+}
+
+function drawAimLine() {
+    aimLine.clear();
+    aimLine.lineStyle(3, 0xffffff, 0.5);
+    const start = localPlayer.body.position;
+    
+    // Simple aim based on joystick or center of screen
+    let angle = joystick.active ? Math.atan2(joystick.curY - joystick.startY, joystick.curX - joystick.startX) : 0;
+    const end = {
+        x: start.x + Math.cos(angle) * 150,
+        y: start.y + Math.sin(angle) * 150
+    };
+    aimLine.moveTo(start.x, start.y).lineTo(end.x, end.y);
+}
+
+function updateStones() {
+    stones.forEach(s => {
+        s.graphic.x = s.body.position.x;
+        s.graphic.y = s.body.position.y;
+    });
+}
+
+function updateCamera() {
+    if(!localPlayer) return;
+    app.viewport.x = window.innerWidth/2 - localPlayer.body.position.x;
+    app.viewport.y = window.innerHeight/2 - localPlayer.body.position.y;
+}
+
+function setupControls() {
+    window.addEventListener('touchstart', e => {
+        const touch = e.touches[0];
+        if(touch.clientX < window.innerWidth/2) {
+            joystick.active = true;
+            joystick.startX = touch.clientX;
+            joystick.startY = touch.clientY;
+            joystick.curX = touch.clientX;
+            joystick.curY = touch.clientY;
+        } else {
+            // Throw action
+            if(isHoldingStone) {
+                const angle = joystick.active ? Math.atan2(joystick.curY - joystick.startY, joystick.curX - joystick.startX) : 0;
+                Matter.Body.setStatic(heldStone.body, false);
+                Matter.Body.applyForce(heldStone.body, heldStone.body.position, {
+                    x: Math.cos(angle) * THROW\_FORCE,
+                    y: Math.sin(angle) * THROW\_FORCE
+                });
+                sfx.throw.play();
+                isHoldingStone = false;
+                heldStone = null;
+                aimLine.clear();
+            }
+        }
+    });
+
+    window.addEventListener('touchmove', e => {
+        if(joystick.active) {
+            joystick.curX = e.touches[0].clientX;
+            joystick.curY = e.touches[0].clientY;
+        }
+    });
+
+    window.addEventListener('touchend', () => {
+        joystick.active = false;
+    });
+
+    document.getElementById('settings-btn').onclick = () => {
+        alert("Settings: \n- Map Size: 3600px\n- Physics: Matter.js\n- Networking: PeerJS WebRTC");
+    };
+}
+
+// Start
+initGame();
+</script>
+</body>
+</html>

@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Stonebound — P2P Physics Arena</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0f14;color:#eaf0f5;font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:none}
+  #game{position:fixed;inset:0}
+  canvas{display:block}
+  #menu{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 35%,#24313e 0,#0b0f14 58%);z-index:20}
+  .card{width:min(92vw,430px);padding:26px;border:1px solid #344452;border-radius:22px;background:rgba(14,20,27,.93);box-shadow:0 20px 80px #0008}
+  h1{margin:0 0 4px;font-size:30px;letter-spacing:-1px}
+  .sub{opacity:.65;margin:0 0 20px;font-size:13px}
+  input,button{width:100%;border:0;border-radius:13px;padding:13px 14px;font:inherit}
+  input{background:#18212a;color:#fff;outline:1px solid #2c3a46;margin-bottom:9px}
+  button{background:#dce8f2;color:#101820;font-weight:800;margin-top:8px;cursor:pointer}
+  button.secondary{background:#202c36;color:#dbe6ed}
+  #roomInfo{margin-top:14px;padding:12px;border-radius:12px;background:#131c24;font-size:12px;word-break:break-all;display:none}
+  #status{margin-top:10px;font-size:12px;opacity:.65;min-height:18px}
+  #hud{position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:8;width:min(94vw,540px);pointer-events:none}
+  #topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#10171ecc;border:1px solid #34414b;border-radius:14px;padding:7px 10px;backdrop-filter:blur(8px);pointer-events:auto;overflow:hidden;max-height:42px;transition:max-height .2s,padding .2s}
+  #topbar.expanded{max-height:170px;padding:10px}
+  #expand{width:auto;margin:0;padding:5px 8px;background:#24313b;color:#fff}
+  #details{display:none;font-size:11px;line-height:1.5;opacity:.72;margin-left:6px}
+  #topbar.expanded #details{display:block}
+  #score{font-weight:800;white-space:nowrap}
+  #hint{position:fixed;left:50%;bottom:12%;transform:translateX(-50%);z-index:7;padding:8px 12px;border-radius:12px;background:#10171dcc;border:1px solid #33414c;font-size:12px;opacity:.75;pointer-events:none}
+  .joy{position:fixed;width:128px;height:128px;border-radius:50%;bottom:max(22px,env(safe-area-inset-bottom));z-index:10;border:1px solid #ffffff20;background:#ffffff0c;backdrop-filter:blur(4px);pointer-events:auto}
+  #moveJoy{left:18px} #aimJoy{right:18px}
+  .joy:after{content:"";position:absolute;width:52px;height:52px;border-radius:50%;left:38px;top:38px;background:#dce8f226;border:1px solid #ffffff20}
+  .knob{position:absolute;width:48px;height:48px;border-radius:50%;left:40px;top:40px;background:#dce8f255;border:1px solid #fff4;pointer-events:none}
+  .label{position:absolute;bottom:-20px;width:100%;text-align:center;font-size:10px;opacity:.55}
+  #action{position:fixed;right:calc(18px + 138px);bottom:max(32px,env(safe-area-inset-bottom));z-index:10;width:74px;height:74px;border-radius:50%;border:1px solid #ffffff2c;background:#dce8f233;color:#fff;font-weight:900;pointer-events:auto}
+  #action.ready{background:#dce8f266;box-shadow:0 0 25px #fff2}
+  #toast{position:fixed;left:50%;top:20%;transform:translateX(-50%);z-index:30;background:#121a22ee;border:1px solid #40515e;padding:10px 15px;border-radius:12px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none}
+  @media(max-width:600px){#action{right:158px}.joy{width:118px;height:118px}.joy:after{left:33px;top:33px}.knob{left:35px;top:35px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="menu">
+  <div class="card">
+    <h1>STONEBOUND</h1>
+    <p class="sub">A tiny peer-to-peer physics arena.</p>
+    <input id="roomInput" placeholder="Room / host ID" autocomplete="off" autocapitalize="off">
+    <button id="create">Create room</button>
+    <button id="join" class="secondary">Join room</button>
+    <div id="roomInfo"></div>
+    <div id="status">PeerJS connects the two browser tabs directly after signaling.</div>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="topbar">
+    <button id="expand">☰</button>
+    <div id="score">Waiting for opponent</div>
+    <div id="details">3600×3600 arena · Matter.js physics · PixiJS renderer · PeerJS P2P<br>Move joystick: walk · Aim joystick: hold to aim / throw · Tap THROW to release a stone.</div>
+  </div>
+</div>
+<div id="hint">Move near a stone and press GRAB. Aim with the right joystick.</div>
+<button id="action">GRAB</button>
+<div id="toast"></div>
+
+<div id="moveJoy" class="joy"><div class="knob"></div><div class="label">MOVE</div></div>
+<div id="aimJoy" class="joy"><div class="knob"></div><div class="label">AIM</div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.20.0/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+<script>
+(() => {
+'use strict';
+
+const WORLD=3600, PLAYER_R=28, STONE_R=15, TICK=60;
+const {Engine,World:MW, Bodies, Body, Composite, Events, Vector, Query} = Matter;
+let app, engine, world, peer, conn=null, isHost=false, myId='', hostId='';
+let players={}, stones=[], obstacles=[], localPlayer=null, remotePlayer=null;
+let running=false, lastSend=0, accumulator=0, camera={x:1800,y:1800};
+let move={x:0,y:0}, aim={x:0,y:0}, aiming=false, heldStone=null, aimPower=0;
+let localInput={x:0,y:0}, remoteInput={x:0,y:0}, lastRemoteAim={x:1,y:0};
+const $=id=>document.getElementById(id);
+const menu=$('menu'), status=$('status'), roomInput=$('roomInput'), roomInfo=$('roomInfo');
+const score=$('score'), action=$('action'), hint=$('hint'), toast=$('toast');
+
+const sfx = {
+  grab:new Howl({src:['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='],volume:.18}),
+  hit:new Howl({src:['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='],volume:.24}),
+  throw:new Howl({src:['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='],volume:.2})
+};
+
+function say(t){toast.textContent=t;toast.style.opacity=1;clearTimeout(say.t);say.t=setTimeout(()=>toast.style.opacity=0,1200)}
+function rand(a,b){return a+Math.random()*(b-a)}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function worldPoint(clientX,clientY){
+  const r=app.view.getBoundingClientRect();
+  return {x:camera.x+(clientX-r.left-r.width/2)/camera.zoom,y:camera.y+(clientY-r.top-r.height/2)/camera.zoom}
+}
+
+function makeMap(){
+  // Boundary walls.
+  const wallOpts={isStatic:true,label:'wall',friction:.8,restitution:.15};
+  obstacles.push(
+    Bodies.rectangle(WORLD/2,-25,WORLD,50,wallOpts),
+    Bodies.rectangle(WORLD/2,WORLD+25,WORLD,50,wallOpts),
+    Bodies.rectangle(-25,WORLD/2,50,WORLD,wallOpts),
+    Bodies.rectangle(WORLD+25,WORLD/2,50,wallOpts)
+  );
+  // Deterministic-ish chunky cover. Host sends the generated map to joiner.
+  const layout=[
+    [700,700,360,70],[2900,720,380,70],[730,2900,400,70],[2870,2890,420,70],
+    [1800,620,90,330],[1800,2980,90,330],[620,1800,330,90],[2980,1800,330,90],
+    [1200,1250,180,180],[2400,1250,180,180],[1200,2350,180,180],[2400,2350,180,180],
+    [1800,1800,260,70],[1800,1800,70,260]
+  ];
+  for(const [x,y,w,h] of layout) obstacles.push(Bodies.rectangle(x,y,w,h,{isStatic:true,label:'obstacle',friction:.7,restitution:.1}));
+  MW.add(world,obstacles);
+
+  stones=[];
+  const spots=[
+    [980,900],[1800,980],[2620,900],[900,1800],[1800,1800],[2700,1800],
+    [980,2700],[1800,2600],[2620,2700],[1500,1500],[2300,1500],[1500,2100],[2300,2100]
+  ];
+  for(const [x,y] of spots) addStone(x,y);
+}
+
+function addStone(x,y,id){
+  const b=Bodies.circle(x,y,STONE_R,{label:'stone',restitution:.62,friction:.45,frictionAir:.008,density:.002});
+  b.stoneId=id||('s'+Math.random().toString(36).slice(2,9));
+  stones.push(b); MW.add(world,b); return b;
+}
+function resetStone(b,x,y){
+  Body.setPosition(b,{x,y}); Body.setVelocity(b,{x:0,y:0}); Body.setAngularVelocity(b,0); Body.setAngle(b.angle||0);
+}
+
+function createPhysics(){
+  engine=Engine.create({enableSleeping:false});
+  world=engine.world; engine.gravity.x=0; engine.gravity.y=0;
+  makeMap();
+  Events.on(engine,'collisionStart',e=>{
+    if(!isHost) return;
+    for(const p of e.pairs){
+      const a=p.bodyA,b=p.bodyB;
+      if((a.label==='stone'&&b.label==='player')||(b.label==='stone'&&a.label==='player')){
+        const stone=a.label==='stone'?a:b, pl=a.label==='player'?a:b;
+        const sp=stone.speed||0;
+        if(sp>8){ damagePlayer(pl,Math.min(45,Math.round(sp*1.9))); sfx.hit.play(); }
+      }
+    }
+  });
+}
+
+function addPlayer(id,x,y,me){
+  const b=Bodies.circle(x,y,PLAYER_R,{
+    label:'player',restitution:.05,friction:.8,frictionAir:.18,density:.01,
+    inertia:Infinity
+  });
+  b.playerId=id;b.hp=100;b.score=0;b.me=me;b.facing={x:1,y:0};
+  players[id]={body:b,id,me}; MW.add(world,b);
+  return players[id];
+}
+function damagePlayer(body,amount){
+  if(body.hp==null)return;
+  body.hp=clamp(body.hp-amount,0,100);
+  send({t:'hit',id:body.playerId,amount});
+  if(body.hp<=0){
+    const p=players[body.playerId]; p.body.hp=100;p.body.score=Math.max(0,p.body.score-1);
+    Body.setPosition(p.body,body.playerId===myId?{x:650,y:650}:{x:2950,y:2950});
+    say(body.playerId===myId?'You were knocked out':'Opponent knocked out');
+  }
+}
+
+function initPixi(){
+  app=new PIXI.Application({resizeTo:window,background:'#10161b',antialias:true,resolution:Math.min(2,devicePixelRatio)});
+  $('game').appendChild(app.view);
+  camera.zoom=Math.min(innerWidth,innerHeight)/850;
+  app.ticker.add(()=>render());
+  window.addEventListener('resize',()=>camera.zoom=Math.min(innerWidth,innerHeight)/850);
+}
+function gfxCircle(color,r){
+  const g=new PIXI.Graphics();g.beginFill(color);g.drawCircle(0,0,r);g.endFill();return g;
+}
+let scene;
+function render(){
+  if(!running)return;
+  if(!scene){
+    scene=new PIXI.Container();app.stage.addChild(scene);
+    const bg=new PIXI.Graphics();bg.beginFill(0x152019);bg.drawRect(0,0,WORLD,WORLD);bg.endFill();scene.addChild(bg);
+    const grid=new PIXI.Graphics();grid.lineStyle(1,0xffffff,.035);
+    for(let x=0;x<=WORLD;x+=150){grid.moveTo(x,0);grid.lineTo(x,WORLD)}
+    for(let y=0;y<=WORLD;y+=150){grid.moveTo(0,y);grid.lineTo(WORLD,y)}
+    scene.addChild(grid);
+    for(const o of obstacles){const g=new PIXI.Graphics();g.beginFill(o.label==='wall'?0x28323a:0x3a4641);g.drawRect(-o.bounds.min.x,-o.bounds.min.y,o.bounds.max.x-o.bounds.min.x,o.bounds.max.y-o.bounds.min.y);g.endFill();g.x=(o.bounds.min.x+o.bounds.max.x)/2;g.y=(o.bounds.min.y+o.bounds.max.y)/2;scene.addChild(g)}
+    scene._stones=new Map();scene._players=new Map();
+  }
+  for(const st of stones){
+    let g=scene._stones.get(st.stoneId);
+    if(!g){g=gfxCircle(0xc6b28b,STONE_R);g.lineStyle(2,0x8e7c5c);scene.addChild(g);scene._stones.set(st.stoneId,g)}
+    g.x=st.position.x;g.y=st.position.y;g.rotation=st.angle;
+    g.alpha=heldStone===st?.55:1;
+  }
+  for(const id in players){
+    const p=players[id],b=p.body;let g=scene._players.get(id);
+    if(!g){
+      g=new PIXI.Container();const body=gfxCircle(id===myId?0x66b6ff:0xff6674,PLAYER_R);g.addChild(body);
+      const hp=new PIXI.Graphics();hp.y=-43;g.addChild(hp);g.hp=hp;scene.addChild(g);scene._players.set(id,g)
+    }
+    g.x=b.position.x;g.y=b.position.y;g.rotation=Math.atan2(b.facing?.y||0,b.facing?.x||1);
+    g.hp.clear();g.hp.beginFill(0x172027);g.hp.drawRect(-30,0,60,5);g.hp.endFill();g.hp.beginFill(id===myId?0x66b6ff:0xff6674);g.hp.drawRect(-30,0,60*clamp(b.hp/100,0,1),5);g.hp.endFill();
+  }
+  // Aim line and projected trajectory.
+  if(localPlayer){
+    const b=localPlayer.body;
+    if(aiming&&aimPower>0){
+      if(!scene._aim){scene._aim=new PIXI.Graphics();scene.addChild(scene._aim)}
+      const g=scene._aim;g.clear();g.lineStyle(4,0xffffff,.8);
+      const dx=aim.x,dy=aim.y, L=90+aimPower*1.2;
+      g.moveTo(b.position.x,b.position.y);g.lineTo(b.position.x+dx*L,b.position.y+dy*L);
+      g.lineStyle(2,0xffffff,.32);
+      let px=b.position.x+dx*40,py=b.position.y+dy*40,v=aimPower*.24;
+      for(let i=0;i<18;i++){px+=dx*v;py+=dy*v;v*=.985;g.drawCircle(px,py,2.5)}
+    } else if(scene._aim){scene._aim.clear()}
+  }
+  camera.x=localPlayer?localPlayer.body.position.x:1800;camera.y=localPlayer?localPlayer.body.position.y:1800;
+  scene.scale.set(camera.zoom);scene.x=app.screen.width/2-camera.x*camera.zoom;scene.y=app.screen.height/2-camera.y*camera.zoom;
+}
+
+function serialize(){
+  return {
+    t:'state', players:Object.values(players).map(p=>({id:p.id,x:p.body.position.x,y:p.body.position.y,vx:p.body.velocity.x,vy:p.body.velocity.y,hp:p.body.hp,score:p.body.score,facing:p.body.facing})),
+    stones:stones.map(s=>({id:s.stoneId,x:s.position.x,y:s.position.y,vx:s.velocity.x,vy:s.velocity.y,a:s.angle})),
+    time:Date.now()
+  };
+}
+function send(m){if(conn&&conn.open)try{conn.send(m)}catch(e){}}
+function broadcast(m){send(m)}
+
+function hostReceive(m){
+  if(m.t==='input') remoteInput={x:clamp(m.x,-1,1),y:clamp(m.y,-1,1)};
+  if(m.t==='aim') lastRemoteAim={x:m.x,y:m.y};
+  if(m.t==='grab') attemptGrab(players[m.id],m.stoneId);
+  if(m.t==='throw') throwStone(players[m.id],m.stoneId,m.x,m.y,m.power);
+  if(m.t==='ping')send({t:'pong',at:m.at});
+}
+function attemptGrab(p,stoneId){
+  if(!p||heldStone) return false;
+  const st=stones.find(s=>s.stoneId===stoneId)||stones.reduce((a,s)=>dist(s.position,p.body.position)<dist(a.position,p.body.position)?s:a,stones[0]);
+  if(st&&dist(st.position,p.body.position)<72&&st.speed<3){
+    p.held=st; resetStone(st,p.body.position.x+p.body.facing.x*42,p.body.position.y+p.body.facing.y*42); st.isSensor=true;
+    if(p.id===myId)heldStone=st;
+    send({t:'held',player:p.id,stoneId:st.stoneId});
+    return true;
+  }
+  return false;
+}
+function throwStone(p,stoneId,x,y,power){
+  if(!p||!p.held)return;
+  const st=p.held;if(st.stoneId!==stoneId)return;
+  p.held=null;if(p.id===myId)heldStone=null;st.isSensor=false;
+  const mag=clamp(power,0,1), dir=Vector.normalise({x,y});
+  Body.setPosition(st,{x:p.body.position.x+dir.x*48,y:p.body.position.y+dir.y*48});
+  Body.setVelocity(st,{x:dir.x*(11+mag*24)+p.body.velocity.x*.3,y:dir.y*(11+mag*24)+p.body.velocity.y*.3});
+  Body.setAngularVelocity(st,rand(-.25,.25));
+  p.body.facing=dir;
+  send({t:'thrown',stoneId:st.stoneId,x:st.position.x,y:st.position.y,vx:st.velocity.x,vy:st.velocity.y});
+  sfx.throw.play();
+}
+
+function stepHost(dt){
+  if(!isHost)return;
+  applyMove(players[myId],localInput);
+  applyMove(players[hostId===myId?'guest':hostId],remoteInput);
+  Engine.update(engine,dt);
+  // Keep held stones attached to players.
+  for(const p of Object.values(players)) if(p.held){
+    const f=p.body.facing||{x:1,y:0};
+    Body.setPosition(p.held,{x:p.body.position.x+f.x*43,y:p.body.position.y+f.y*43});
+    Body.setVelocity(p.held,p.body.velocity);
+  }
+  if(performance.now()-lastSend>32){broadcast(serialize());lastSend=performance.now()}
+}
+function applyMove(p,input){
+  if(!p)return;
+  const len=Math.hypot(input.x,input.y);if(len<.05)return;
+  const nx=input.x/Math.max(1,len),ny=input.y/Math.max(1,len);
+  Body.applyForce(p.body,p.body.position,{x:nx*.0026,y:ny*.0026});
+  p.body.facing={x:nx,y:ny};
+}
+
+function clientReceive(m){
+  if(m.t==='state'){
+    for(const q of m.players){
+      const p=players[q.id];
+      if(!p)continue;
+      if(q.id!==myId){Body.setPosition(p.body,{x:q.x,y:q.y});Body.setVelocity(p.body,{x:q.vx,y:q.vy})}
+      p.body.hp=q.hp;p.body.score=q.score;p.body.facing=q.facing||p.body.facing;
+    }
+    for(const q of m.stones){const s=stones.find(x=>x.stoneId===q.id);if(s&&heldStone!==s){Body.setPosition(s,{x:q.x,y:q.y});Body.setVelocity(s,{x:q.vx,y:q.vy});Body.setAngle(s,q.a)}}
+    updateScore();
+  }
+  if(m.t==='held'){const s=stones.find(x=>x.stoneId===m.stoneId);if(s){s.isSensor=true;if(m.player!==myId)heldStone=null}}
+  if(m.t==='thrown'){const s=stones.find(x=>x.stoneId===m.stoneId);if(s){s.isSensor=false;Body.setPosition(s,{x:m.x,y:m.y});Body.setVelocity(s,{x:m.vx,y:m.vy})}}
+  if(m.t==='hit'&&m.id===myId){localPlayer.body.hp=clamp(localPlayer.body.hp-m.amount,0,100);say('-'+m.amount+' HP');sfx.hit.play()}
+}
+
+function updateScore(){
+  const me=players[myId],op=Object.values(players).find(p=>p.id!==myId);
+  score.textContent=me?`YOU ${Math.round(me.body.hp)} HP · ${me.body.score} KOs ${op?' · OPP '+Math.round(op.body.hp)+' HP':''}`:'Connected';
+}
+
+function setupPeer(create){
+  isHost=create;
+  status.textContent='Connecting to PeerJS…';
+  peer=new Peer(undefined,{debug:1});
+  peer.on('open',id=>{
+    myId=id;
+    if(create){
+      hostId=id; roomInput.value=id; roomInfo.style.display='block';roomInfo.textContent='ROOM ID: '+id+'  — copy this into the other tab.';
+      status.textContent='Room created. Open this page in another tab and join with this ID.';
+      startGame(true);
+    } else {
+      hostId=roomInput.value.trim();
+      if(!hostId){status.textContent='Enter the host Room ID first.';return}
+      conn=peer.connect(hostId,{reliable:true});
+      wireConnection(conn,false);
+    }
+  });
+  peer.on('connection',c=>{if(isHost&&!conn){conn=c;wireConnection(conn,true)}});
+  peer.on('error',e=>{status.textContent='Peer error: '+e.type;console.error(e)});
+}
+function wireConnection(c,hostSide){
+  conn=c;
+  c.on('open',()=>{
+    status.textContent='Connected!';
+    if(hostSide){
+      c.send({t:'hello',hostId});
+      startGame(true);
+      addGuestIfNeeded();
+    } else {
+      c.send({t:'hello',hostId});
+    }
+  });
+  c.on('data',m=>{
+    if(isHost)hostReceive(m); else {
+      if(m.t==='hello') startGame(false);
+      clientReceive(m);
+    }
+  });
+  c.on('close',()=>{say('Opponent disconnected');status.textContent='Opponent disconnected';});
+}
+function addGuestIfNeeded(){
+  if(!players.guest){
+    const p=addPlayer('guest',2950,2950,false);
+    players.guest=p;
+    conn.send({t:'state',players:[{id:myId,x:players[myId].body.position.x,y:players[myId].body.position.y,vx:0,vy:0,hp:100,score:0,facing:{x:1,y:0}}],stones:stones.map(s=>({id:s.stoneId,x:s.position.x,y:s.position.y,vx:0,vy:0,a:0}))});
+  }
+}
+function startGame(host){
+  if(running)return;
+  running=true;menu.style.display='none';hint.textContent='Move near a stone. Tap GRAB, aim, then THROW.';
+  createPhysics();
+  const me=addPlayer(myId,host?650:2950,host?650:2950,true);localPlayer=me;
+  if(host){addPlayer('guest',2950,2950,false);players.guest=players.guest||players['guest'];}
+  if(!host){
+    // The host's state will fill remote data; local player exists immediately.
+    if(conn)conn.send({t:'ready'});
+  }
+  updateScore();
+  let prev=performance.now();
+  app.ticker.add(()=>{
+    const now=performance.now(),dt=Math.min(50,now-prev);prev=now;
+    if(isHost){
+      stepHost(dt);
+      if(localInput.x||localInput.y){} 
+    } else {
+      applyMove(localPlayer,localInput);Engine.update(engine,dt);
+      if(performance.now()-lastSend>40){send({t:'input',x:localInput.x,y:localInput.y});send({t:'aim',x:aim.x,y:aim.y});lastSend=performance.now()}
+    }
+  });
+}
+
+function actionPress(){
+  if(!localPlayer)return;
+  if(heldStone){
+    const d=aimPower>0?aim:{x:localPlayer.body.facing.x,y:localPlayer.body.facing.y};
+    if(isHost)throwStone(localPlayer,heldStone.stoneId,d.x,d.y,aimPower||.6);
+    else send({t:'throw',id:myId,stoneId:heldStone.stoneId,x:d.x,y:d.y,power:aimPower||.6});
+    action.textContent='GRAB';action.classList.remove('ready');return;
+  }
+  let nearest=null,best=80;
+  for(const s of stones){const d=dist(s.position,localPlayer.body.position);if(d<best&&s.speed<3){nearest=s;best=d}}
+  if(nearest){
+    if(isHost)attemptGrab(localPlayer,nearest.stoneId);
+    else send({t:'grab',id:myId,stoneId:nearest.stoneId});
+    action.textContent='THROW';action.classList.add('ready');sfx.grab.play();
+  } else say('No stone close enough');
+}
+
+function joystick(el,callback){
+  const knob=el.querySelector('.knob');let active=false,id=null;
+  function set(e){
+    const r=el.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;
+    let x=e.clientX-cx,y=e.clientY-cy,max=r.width*.34,l=Math.hypot(x,y);
+    if(l>max){x=x/l*max;y=y/l*max}
+    knob.style.transform=`translate(${x}px,${y}px)`;callback(x/max,y/max,true);
+  }
+  el.addEventListener('pointerdown',e=>{active=true;id=e.pointerId;el.setPointerCapture(id);set(e);});
+  el.addEventListener('pointermove',e=>{if(active&&e.pointerId===id)set(e)});
+  const end=e=>{if(e.pointerId!==id)return;active=false;knob.style.transform='';callback(0,0,false)};
+  el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+}
+joystick($('moveJoy'),(x,y)=>{localInput={x,y};move={x,y}});
+joystick($('aimJoy'),(x,y,active)=>{
+  aim={x,y};aiming=active;
+  if(active){aimPower=clamp(Math.hypot(x,y),0,1);if(localPlayer&&Math.hypot(x,y)>.1)localPlayer.body.facing={x,y}}
+  else aimPower=0;
+  if(!isHost&&active)send({t:'aim',x,y});
+});
+action.addEventListener('pointerdown',e=>{e.preventDefault();actionPress()});
+$('expand').onclick=()=> $('topbar').classList.toggle('expanded');
+$('create').onclick=()=>setupPeer(true);
+$('join').onclick=()=>setupPeer(false);
+roomInput.addEventListener('keydown',e=>{if(e.key==='Enter')setupPeer(false)});
+
+initPixi();
+})();
+</script>
+</body>
+</html>
