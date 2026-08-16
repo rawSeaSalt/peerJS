@@ -3,93 +3,234 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PeerJS P2P Chat</title>
+  <title>PeerJS Secured Room & File Share</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 2rem auto; padding: 0 1rem; }
-    #chat-box { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; border-radius: 4px; }
-    .msg { margin: 5px 0; }
-    .sent { color: #0066cc; text-align: right; }
-    .received { color: #333; }
-    .controls { display: flex; gap: 5px; margin-bottom: 15px; }
-    input { flex: 1; padding: 8px; }
-    button { padding: 8px 16px; cursor: pointer; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 650px; margin: 2rem auto; padding: 0 1rem; color: #333; }
+    .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.5rem; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1rem; }
+    .hidden { display: none !important; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.9em; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+    .btn-group { display: flex; gap: 10px; }
+    button { flex: 1; padding: 10px 16px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+    .btn-primary { background: #0066cc; color: white; }
+    .btn-primary:hover { background: #0052a3; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:hover { background: #d0d0d0; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    #chat-box { border: 1px solid #e0e0e0; height: 350px; overflow-y: auto; padding: 12px; border-radius: 6px; background: #fafafa; margin-bottom: 1rem; }
+    .msg { margin: 8px 0; word-break: break-word; font-size: 0.95em; }
+    .sent { text-align: right; color: #0066cc; }
+    .received { color: #222; }
+    .system { text-align: center; color: #777; font-style: italic; font-size: 0.85em; margin: 10px 0; }
+    .file-card { display: inline-block; background: #eef5ff; border: 1px solid #cce0ff; padding: 8px 12px; border-radius: 6px; margin-top: 4px; }
+    .file-card a { color: #0066cc; text-decoration: none; font-weight: 600; }
+    .controls { display: flex; gap: 8px; }
+    .file-btn { display: inline-block; padding: 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; }
+    .peer-info { font-size: 0.85em; color: #666; margin-bottom: 1rem; background: #f4f4f4; padding: 8px 12px; border-radius: 6px; }
   </style>
 </head>
 <body>
 
-  <h2>P2P PeerJS Chat</h2>
-  <p><strong>Your ID:</strong> <span id="my-id">Generating...</span></p>
+  <h2>P2P Mesh Room & File Share</h2>
 
-  <div class="controls">
-    <input type="text" id="peer-id-input" placeholder="Enter friend's Peer ID" />
-    <button onclick="connectToPeer()">Connect</button>
+  <!-- ROOM ENTRY FORM -->
+  <div id="setup-card" class="card">
+    <div class="form-group">
+      <label for="room-input">Room Name</label>
+      <input type="text" id="room-input" placeholder="e.g. dev-team-room" />
+    </div>
+    <div class="form-group">
+      <label for="pin-input">Room PIN (Optional)</label>
+      <input type="password" id="pin-input" placeholder="Enter PIN code" />
+    </div>
+    <div class="btn-group">
+      <button class="btn-primary" onclick="initRoom(true)">Create Room</button>
+      <button class="btn-secondary" onclick="initRoom(false)">Join Room</button>
+    </div>
   </div>
 
-  <div id="chat-box"></div>
+  <!-- ACTIVE CHAT INTERFACE -->
+  <div id="chat-card" class="card hidden">
+    <div class="peer-info">
+      <div><strong>Room:</strong> <span id="current-room"></span></div>
+      <div><strong>Connected Peers (<span id="peer-count">0</span>):</strong> <span id="peer-list">None</span></div>
+    </div>
 
-  <div class="controls">
-    <input type="text" id="message-input" placeholder="Type a message..." disabled />
-    <button id="send-btn" onclick="sendMessage()" disabled>Send</button>
+    <div id="chat-box"></div>
+
+    <div class="controls">
+      <input type="text" id="message-input" placeholder="Type a message..." />
+      <label class="file-btn" title="Send File">
+        📁 <input type="file" id="file-input" style="display:none;" onchange="sendFile(this)" />
+      </label>
+      <button class="btn-primary" style="flex: 0 0 auto;" onclick="sendMessage()">Send</button>
+    </div>
   </div>
 
   <script>
-    const peer = new Peer();
-    let conn = null;
+    let peer = null;
+    let myId = '';
+    let roomPin = '';
+    let isHost = false;
+    const connections = {}; // Stores all active mesh connections
 
-    const myIdEl = document.getElementById('my-id');
+    const setupCard = document.getElementById('setup-card');
+    const chatCard = document.getElementById('chat-card');
     const chatBox = document.getElementById('chat-box');
     const messageInput = document.getElementById('message-input');
-    const sendBtn = document.getElementById('send-btn');
+    const peerCountEl = document.getElementById('peer-count');
+    const peerListEl = document.getElementById('peer-list');
+    const currentRoomEl = document.getElementById('current-room');
 
-    // Display your generated Peer ID
-    peer.on('open', (id) => {
-      myIdEl.textContent = id;
-    });
-
-    // Handle incoming connections from another peer
-    peer.on('connection', (incomingConn) => {
-      conn = incomingConn;
-      setupConnection();
-      appendMessage('System', 'Connected to incoming peer!');
-    });
-
-    // Connect to another peer manually
-    function connectToPeer() {
-      const targetId = document.getElementById('peer-id-input').value.trim();
-      if (!targetId) return alert('Please enter a Peer ID');
+    function initRoom(asHost) {
+      const roomName = document.getElementById('room-input').value.trim().toLowerCase();
+      roomPin = document.getElementById('pin-input').value.trim();
       
-      conn = peer.connect(targetId);
-      setupConnection();
+      if (!roomName) return alert('Please enter a Room Name.');
+      
+      isHost = asHost;
+      const hostId = `room-mesh-${roomName}`;
+
+      // Host claims the static Room ID; Joiners generate a random ID
+      peer = asHost ? new Peer(hostId) : new Peer();
+
+      peer.on('open', (id) => {
+        myId = id;
+        setupCard.classList.add('hidden');
+        chatCard.classList.remove('hidden');
+        currentRoomEl.textContent = roomName;
+        appendMessage('System', `Entered room "${roomName}" as ${asHost ? 'Host' : 'Member'}.`, 'system');
+
+        if (!asHost) {
+          // Joiners automatically initiate connection to the Host ID
+          connectToPeer(hostId);
+        }
+      });
+
+      peer.on('connection', (conn) => {
+        setupConnection(conn);
+      });
+
+      peer.on('error', (err) => {
+        if (err.type === 'unavailable-id') {
+          alert('Room name already active! Try joining instead of creating.');
+        } else {
+          alert('PeerJS Error: ' + err.type);
+        }
+      });
     }
 
-    // Attach message listeners to active connection
-    function setupConnection() {
+    function connectToPeer(targetId) {
+      if (connections[targetId] || targetId === myId) return;
+      const conn = peer.connect(targetId);
+      setupConnection(conn);
+    }
+
+    function setupConnection(conn) {
+      let isAuthenticated = false;
+
       conn.on('open', () => {
-        messageInput.disabled = false;
-        sendBtn.disabled = false;
-        appendMessage('System', 'Connected!');
+        // Send PIN verification attempt immediately upon connection
+        conn.send({ type: 'AUTH_REQ', pin: roomPin, sender: myId });
       });
 
       conn.on('data', (data) => {
-        appendMessage('Peer', data, 'received');
+        if (typeof data !== 'object') return;
+
+        // --- AUTH HANDSHAKE PROTOCOL ---
+        if (data.type === 'AUTH_REQ') {
+          if (roomPin && data.pin !== roomPin) {
+            conn.send({ type: 'AUTH_FAILED', reason: 'Incorrect Room PIN' });
+            setTimeout(() => conn.close(), 500);
+            return;
+          }
+          conn.send({ type: 'AUTH_OK' });
+          isAuthenticated = true;
+          connections[conn.peer] = conn;
+          updatePeerList();
+          broadcastPeerList();
+          appendMessage('System', `Peer ${conn.peer.substring(0, 6)} joined the mesh.`, 'system');
+          return;
+        }
+
+        if (data.type === 'AUTH_FAILED') {
+          alert('Access Denied: ' + (data.reason || 'Authentication failed.'));
+          conn.close();
+          return;
+        }
+
+        if (data.type === 'AUTH_OK') {
+          isAuthenticated = true;
+          connections[conn.peer] = conn;
+          updatePeerList();
+          broadcastPeerList();
+          return;
+        }
+
+        // Drop unauthenticated traffic
+        if (!isAuthenticated) return;
+
+        // --- MESH MESH DISCOVERY & PAYLOADS ---
+        if (data.type === 'PEER_LIST') {
+          data.peers.forEach(id => {
+            if (id !== myId && !connections[id]) connectToPeer(id);
+          });
+        } else if (data.type === 'CHAT') {
+          appendMessage(data.sender.substring(0, 6), data.text, 'received');
+        } else if (data.type === 'FILE') {
+          appendFileMessage(data.sender.substring(0, 6), data.fileName, data.fileData, 'received');
+        }
       });
 
       conn.on('close', () => {
-        appendMessage('System', 'Connection closed.');
-        messageInput.disabled = true;
-        sendBtn.disabled = true;
+        delete connections[conn.peer];
+        updatePeerList();
+        appendMessage('System', `Peer left the room.`, 'system');
       });
     }
 
-    // Send chat message over DataConnection
+    // Share connection routing table across all peers
+    function broadcastPeerList() {
+      const knownPeers = [...Object.keys(connections), myId];
+      broadcast({ type: 'PEER_LIST', peers: knownPeers });
+    }
+
+    function broadcast(payload) {
+      Object.values(connections).forEach(conn => {
+        if (conn.open) conn.send(payload);
+      });
+    }
+
     function sendMessage() {
       const text = messageInput.value.trim();
-      if (!text || !conn) return;
+      if (!text) return;
 
-      conn.send(text);
+      broadcast({ type: 'CHAT', sender: myId, text: text });
       appendMessage('You', text, 'sent');
       messageInput.value = '';
+    }
+
+    function sendFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      // Restrict file size to ~15MB for browser DataChannel memory limits
+      if (file.size > 15 * 1024 * 1024) {
+        alert('File size exceeds 15MB limit for direct P2P channel.');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const fileData = e.target.result;
+        broadcast({ type: 'FILE', sender: myId, fileName: file.name, fileData: fileData });
+        appendFileMessage('You', file.name, fileData, 'sent');
+        input.value = ''; // Reset input
+      };
+      reader.readAsDataURL(file);
     }
 
     function appendMessage(sender, text, className = '') {
@@ -99,6 +240,27 @@
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
+
+    function appendFileMessage(sender, fileName, dataUrl, className = '') {
+      const div = document.createElement('div');
+      div.className = `msg ${className}`;
+      div.innerHTML = `<div><strong>${sender}:</strong> shared a file:</div>
+        <div class="file-card">📄 <a href="${dataUrl}" download="${fileName}">${fileName}</a></div>`;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function updatePeerList() {
+      const activeIds = Object.keys(connections);
+      peerCountEl.textContent = activeIds.length;
+      peerListEl.textContent = activeIds.length > 0 
+        ? activeIds.map(id => id.substring(0, 6)).join(', ') 
+        : 'None';
+    }
+
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
   </script>
 </body>
 </html>
