@@ -3,264 +3,542 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PeerJS Secured Room & File Share</title>
+  <title>Boulder Brawn - P2P Physics Prototype</title>
+
+  <!-- External Libraries -->
+  <script src="https://pixijs.download/v7.3.2/pixi.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; max-width: 650px; margin: 2rem auto; padding: 0 1rem; color: #333; }
-    .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.5rem; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 1rem; }
-    .hidden { display: none !important; }
-    .form-group { margin-bottom: 1rem; }
-    label { display: block; font-weight: 600; margin-bottom: 0.3rem; font-size: 0.9em; }
-    input[type="text"], input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
-    .btn-group { display: flex; gap: 10px; }
-    button { flex: 1; padding: 10px 16px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
-    .btn-primary { background: #0066cc; color: white; }
-    .btn-primary:hover { background: #0052a3; }
-    .btn-secondary { background: #e0e0e0; color: #333; }
-    .btn-secondary:hover { background: #d0d0d0; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #121214; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 10px; }
     
-    #chat-box { border: 1px solid #e0e0e0; height: 350px; overflow-y: auto; padding: 12px; border-radius: 6px; background: #fafafa; margin-bottom: 1rem; }
-    .msg { margin: 8px 0; word-break: break-word; font-size: 0.95em; }
-    .sent { text-align: right; color: #0066cc; }
-    .received { color: #222; }
-    .system { text-align: center; color: #777; font-style: italic; font-size: 0.85em; margin: 10px 0; }
-    .file-card { display: inline-block; background: #eef5ff; border: 1px solid #cce0ff; padding: 8px 12px; border-radius: 6px; margin-top: 4px; }
-    .file-card a { color: #0066cc; text-decoration: none; font-weight: 600; }
-    .controls { display: flex; gap: 8px; }
-    .file-btn { display: inline-block; padding: 10px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; }
-    .peer-info { font-size: 0.85em; color: #666; margin-bottom: 1rem; background: #f4f4f4; padding: 8px 12px; border-radius: 6px; }
+    #lobby-bar { background: #1e1e24; padding: 12px 20px; border-radius: 8px; border: 1px solid #333; margin-bottom: 10px; display: flex; gap: 15px; align-items: center; width: 800px; justify-content: space-between; }
+    input { padding: 8px 12px; background: #0d0d10; border: 1px solid #444; color: #fff; border-radius: 4px; width: 180px; }
+    button { padding: 8px 16px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #0052a3; }
+    
+    #canvas-container { border: 2px solid #333; border-radius: 8px; overflow: hidden; position: relative; width: 800px; height: 600px; }
+    
+    #controls-guide { margin-top: 10px; width: 800px; background: #1e1e24; padding: 10px 15px; border-radius: 6px; font-size: 0.85rem; color: #aaa; display: flex; justify-content: space-around; }
+    .key { background: #333; color: #fff; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
   </style>
 </head>
 <body>
 
-  <h2>P2P Mesh Room & File Share</h2>
-
-  <!-- ROOM ENTRY FORM -->
-  <div id="setup-card" class="card">
-    <div class="form-group">
-      <label for="room-input">Room Name</label>
-      <input type="text" id="room-input" placeholder="e.g. dev-team-room" />
+  <!-- LOBBY & NETWORKING CONTROL -->
+  <div id="lobby-bar">
+    <div><strong>My ID:</strong> <span id="my-id" style="color:#00ffff;">Connecting...</span></div>
+    <div style="display: flex; gap: 8px;">
+      <input type="text" id="join-id-input" placeholder="Enter Host Room ID" />
+      <button onclick="joinRoom()">Join Room</button>
     </div>
-    <div class="form-group">
-      <label for="pin-input">Room PIN (Optional)</label>
-      <input type="password" id="pin-input" placeholder="Enter PIN code" />
-    </div>
-    <div class="btn-group">
-      <button class="btn-primary" onclick="initRoom(true)">Create Room</button>
-      <button class="btn-secondary" onclick="initRoom(false)">Join Room</button>
-    </div>
+    <div id="net-status" style="color:#ffcc00; font-size:0.9em;">Solo Mode (Host)</div>
   </div>
 
-  <!-- ACTIVE CHAT INTERFACE -->
-  <div id="chat-card" class="card hidden">
-    <div class="peer-info">
-      <div><strong>Room:</strong> <span id="current-room"></span></div>
-      <div><strong>Connected Peers (<span id="peer-count">0</span>):</strong> <span id="peer-list">None</span></div>
-    </div>
+  <!-- GAME CANVAS CONTAINER -->
+  <div id="canvas-container"></div>
 
-    <div id="chat-box"></div>
-
-    <div class="controls">
-      <input type="text" id="message-input" placeholder="Type a message..." />
-      <label class="file-btn" title="Send File">
-        📁 <input type="file" id="file-input" style="display:none;" onchange="sendFile(this)" />
-      </label>
-      <button class="btn-primary" style="flex: 0 0 auto;" onclick="sendMessage()">Send</button>
-    </div>
+  <!-- CONTROLS INSTRUCTIONS -->
+  <div id="controls-guide">
+    <span><span class="key">A</span> / <span class="key">D</span> Move Left/Right</span>
+    <span><span class="key">W</span> Jump</span>
+    <span><span class="key">E</span> or <span class="key">Right Click</span> Grab / Drop Stone</span>
+    <span><span class="key">Left Click</span> Throw Held Stone</span>
   </div>
 
   <script>
-    let peer = null;
-    let myId = '';
-    let roomPin = '';
-    let isHost = false;
-    const connections = {}; // Stores all active mesh connections
+    // --- MODULE ALIASES ---
+    const { Engine, World, Bodies, Body, Vector, Constraint, Events } = Matter;
 
-    const setupCard = document.getElementById('setup-card');
-    const chatCard = document.getElementById('chat-card');
-    const chatBox = document.getElementById('chat-box');
-    const messageInput = document.getElementById('message-input');
-    const peerCountEl = document.getElementById('peer-count');
-    const peerListEl = document.getElementById('peer-list');
-    const currentRoomEl = document.getElementById('current-room');
+    // --- GAME CONSTANTS ---
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 600;
 
-    function initRoom(asHost) {
-      const roomName = document.getElementById('room-input').value.trim().toLowerCase();
-      roomPin = document.getElementById('pin-input').value.trim();
+    // --- STATE VARIABLES ---
+    let app, engine, world;
+    let peer, peerId = '', connections = {};
+    let isHost = true;
+    
+    const keys = {};
+    const mousePos = { x: 0, y: 0, isDown: false };
+    
+    // Physics & Visual entities registry
+    const players = {}; // id -> { body, graphics, constraint, isCrushed, heldStone }
+    const stones = [];  // array of { body, graphics }
+
+    // Initialize Application
+    window.onload = () => {
+      initPixi();
+      initMatter();
+      initPeerJS();
+      setupLevel();
+      setupInputs();
       
-      if (!roomName) return alert('Please enter a Room Name.');
+      // Spawn Local Player on Host
+      createPlayer('local-host', 200, 300, 0x00ccff);
       
-      isHost = asHost;
-      const hostId = `room-mesh-${roomName}`;
+      // Run Combined Engine & Render Loop
+      app.ticker.add(gameLoop);
+    };
 
-      // Host claims the static Room ID; Joiners generate a random ID
-      peer = asHost ? new Peer(hostId) : new Peer();
+    // ----------------------------------------------------------------
+    // 1. ENGINE & GRAPHICS SETUP
+    // ----------------------------------------------------------------
+    function initPixi() {
+      app = new PIXI.Application({
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+        backgroundColor: 0x18181c,
+        antialias: true
+      });
+      document.getElementById('canvas-container').appendChild(app.view);
+    }
+
+    function initMatter() {
+      engine = Engine.create({
+        gravity: { x: 0, y: 1.2 } // Standard heavy gravity
+      });
+      world = engine.world;
+
+      // Handle Kinetic Impact Crushing
+      Events.on(engine, 'collisionStart', (event) => {
+        event.pairs.forEach(pair => {
+          const { bodyA, bodyB } = pair;
+          checkImpactCrush(bodyA, bodyB);
+          checkImpactCrush(bodyB, bodyA);
+        });
+      });
+    }
+
+    function setupLevel() {
+      // Create Boundaries (Walls & Floor)
+      const options = { isStatic: true, friction: 0.8, restitution: 0.2 };
+      const ground = Bodies.rectangle(400, 590, 800, 30, options);
+      const leftWall = Bodies.rectangle(10, 300, 20, 600, options);
+      const rightWall = Bodies.rectangle(790, 300, 20, 600, options);
+      const ceiling = Bodies.rectangle(400, 10, 800, 20, options);
+      
+      World.add(world, [ground, leftWall, rightWall, ceiling]);
+
+      // Draw Static Boundaries with Pixi
+      [ground, leftWall, rightWall, ceiling].forEach(b => {
+        const g = new PIXI.Graphics();
+        g.beginFill(0x33333d);
+        g.drawRect(-b.bounds.max.x + b.position.x, -b.bounds.max.y + b.position.y, 
+                   (b.bounds.max.x - b.bounds.min.x), (b.bounds.max.y - b.bounds.min.y));
+        g.endFill();
+        g.position.set(b.position.x, b.position.y);
+        app.stage.addChild(g);
+      });
+
+      // Spawn Physics Boulders (Stones)
+      if (isHost) {
+        spawnStone(300, 400, 20, 10);  // Medium Stone
+        spawnStone(450, 400, 32, 35);  // Massive Heavy Boulder
+        spawnStone(550, 400, 15, 5);   // Small Throwing Rock
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // 2. ENTITY CREATION (PLAYERS & BOULDERS)
+    // ----------------------------------------------------------------
+    function createPlayer(id, x, y, color) {
+      // Rigid body player (High friction, upright inertia)
+      const playerBody = Bodies.circle(x, y, 18, {
+        friction: 0.7,
+        restitution: 0.0,
+        density: 0.005,
+        inertia: Infinity, // Prevents player body from tipping over while walking
+        label: 'player_' + id
+      });
+
+      const graphics = new PIXI.Graphics();
+
+      World.add(world, playerBody);
+      
+      players[id] = {
+        id: id,
+        body: playerBody,
+        graphics: graphics,
+        color: color,
+        constraint: null,
+        heldStone: null,
+        isCrushed: false,
+        inputs: { left: false, right: false, jump: false, grab: false, mouse: { x: 0, y: 0 } }
+      };
+
+      app.stage.addChild(graphics);
+      return players[id];
+    }
+
+    function spawnStone(x, y, radius, mass) {
+      const stoneBody = Bodies.circle(x, y, radius, {
+        friction: 0.9,
+        restitution: 0.3,
+        density: mass * 0.001,
+        label: 'stone'
+      });
+
+      const graphics = new PIXI.Graphics();
+      graphics.beginFill(0x888899);
+      graphics.lineStyle(2, 0xaaaaee);
+      graphics.drawCircle(0, 0, radius);
+      graphics.endFill();
+
+      World.add(world, stoneBody);
+      app.stage.addChild(graphics);
+
+      stones.push({ body: stoneBody, graphics: graphics, radius: radius });
+    }
+
+    // ----------------------------------------------------------------
+    // 3. GAME LOOP & PHYSICS UPDATE
+    // ----------------------------------------------------------------
+    function gameLoop(delta) {
+      if (isHost) {
+        // Step Matter.js Physics Engine
+        Engine.update(engine, app.ticker.deltaMS);
+
+        // Process Player Inputs
+        Object.values(players).forEach(p => updatePlayerPhysics(p));
+
+        // Sync State to PeerJS Clients (30 FPS throttle built-in)
+        broadcastWorldState();
+      }
+
+      // Render Visual Sync (Matter -> Pixi)
+      renderSync();
+    }
+
+    function updatePlayerPhysics(p) {
+      if (p.isCrushed) return;
+
+      const body = p.body;
+      const moveSpeed = 0.007 * body.mass;
+
+      // Lateral Movement Forces
+      if (p.inputs.left)  Body.applyForce(body, body.position, { x: -moveSpeed, y: 0 });
+      if (p.inputs.right) Body.applyForce(body, body.position, { x: moveSpeed, y: 0 });
+
+      // Jump Impulse (Only if grounded)
+      if (p.inputs.jump && Math.abs(body.velocity.y) < 0.2) {
+        Body.applyForce(body, body.position, { x: 0, y: -0.15 * body.mass });
+      }
+
+      // Grab / Release Stone Logic
+      if (p.inputs.grab) {
+        p.inputs.grab = false; // Toggle trigger once
+        if (p.constraint) {
+          dropStone(p);
+        } else {
+          tryGrabStone(p);
+        }
+      }
+
+      // Throwing Logic (On Mouse Click)
+      if (p.inputs.throw && p.heldStone) {
+        p.inputs.throw = false;
+        throwStone(p);
+      }
+    }
+
+    function tryGrabStone(p) {
+      // Find nearest stone within pickup radius
+      const grabRadius = 60;
+      for (let s of stones) {
+        const dist = Vector.magnitude(Vector.sub(s.body.position, p.body.position));
+        if (dist < grabRadius + s.radius) {
+          // Attach stretchy physical spring constraint
+          p.constraint = Constraint.create({
+            bodyA: p.body,
+            bodyB: s.body,
+            stiffness: 0.1,
+            damping: 0.05,
+            length: p.body.circleRadius + s.radius + 10
+          });
+          p.heldStone = s.body;
+          World.add(world, p.constraint);
+          break;
+        }
+      }
+    }
+
+    function dropStone(p) {
+      if (p.constraint) {
+        World.remove(world, p.constraint);
+        p.constraint = null;
+        p.heldStone = null;
+      }
+    }
+
+    function throwStone(p) {
+      const stone = p.heldStone;
+      dropStone(p);
+
+      // Calculate direction vector toward cursor
+      const throwDir = Vector.normalise(Vector.sub(p.inputs.mouse, p.body.position));
+      const forceMagnitude = 0.08 * stone.mass; // Force scales with boulder mass!
+
+      // Apply explosive impulse to boulder & recoil force back to player
+      Body.applyForce(stone, stone.position, Vector.mult(throwDir, forceMagnitude));
+      Body.applyForce(p.body, p.body.position, Vector.mult(throwDir, -forceMagnitude * 0.4));
+    }
+
+    // ----------------------------------------------------------------
+    // 4. SELF-CRUSHING & IMPACT PHYSICS
+    // ----------------------------------------------------------------
+    function checkImpactCrush(bodyA, bodyB) {
+      if (!bodyA.label.startsWith('player_') || bodyB.label !== 'stone') return;
+
+      const playerId = bodyA.label.replace('player_', '');
+      const player = players[playerId];
+      if (!player || player.isCrushed) return;
+
+      // Calculate Kinetic Impact Energy (F = mass * relative velocity)
+      const relVel = Vector.sub(bodyB.velocity, bodyA.velocity);
+      const speed = Vector.magnitude(relVel);
+      const impactForce = speed * bodyB.mass;
+
+      // High kinetic velocity threshold OR pinned underneath a downward boulder
+      const isSquishedFromAbove = bodyB.position.y < bodyA.position.y && bodyB.velocity.y > 3;
+
+      if (impactForce > 45 || isSquishedFromAbove) {
+        crushPlayer(player);
+      }
+    }
+
+    function crushPlayer(p) {
+      p.isCrushed = true;
+      dropStone(p);
+
+      // Disable physics collisions & flatten visual body shape
+      p.body.sensor = true;
+      
+      // Auto-Respawn Timer after 3 seconds
+      setTimeout(() => {
+        p.isCrushed = false;
+        p.body.sensor = false;
+        Body.setPosition(p.body, { x: 200 + Math.random() * 400, y: 100 });
+        Body.setVelocity(p.body, { x: 0, y: 0 });
+      }, 3000);
+    }
+
+    // ----------------------------------------------------------------
+    // 5. GRAPHICS SYNC
+    // ----------------------------------------------------------------
+    function renderSync() {
+      // Sync Player Sprites
+      Object.values(players).forEach(p => {
+        const g = p.graphics;
+        g.clear();
+
+        if (p.isCrushed) {
+          // Render flattened squashed pancake shape
+          g.beginFill(0xff3333);
+          g.drawEllipse(0, 0, 24, 6);
+          g.endFill();
+        } else {
+          // Render Normal Player Body
+          g.beginFill(p.color);
+          g.drawCircle(0, 0, 18);
+          g.endFill();
+
+          // Draw Aiming Reticle Line toward Mouse
+          if (p.id === 'local-host' || p.id === peerId) {
+            g.lineStyle(2, 0xffffff, 0.5);
+            const aimDir = Vector.normalise(Vector.sub(mousePos, p.body.position));
+            g.moveTo(0, 0);
+            g.lineTo(aimDir.x * 30, aimDir.y * 30);
+          }
+        }
+
+        g.position.set(p.body.position.x, p.body.position.y);
+
+        // Draw Elastic Tether Line if holding a stone
+        if (p.heldStone) {
+          g.lineStyle(3, 0xffff00, 0.8);
+          g.moveTo(0, 0);
+          g.lineTo(p.heldStone.position.x - p.body.position.x, p.heldStone.position.y - p.body.position.y);
+        }
+      });
+
+      // Sync Boulder Sprites
+      stones.forEach(s => {
+        s.graphics.position.set(s.body.position.x, s.body.position.y);
+        s.graphics.rotation = s.body.angle;
+      });
+    }
+
+    // ----------------------------------------------------------------
+    // 6. PEERJS NETWORKING ARCHITECTURE (HOST-CLIENT)
+    // ----------------------------------------------------------------
+    function initPeerJS() {
+      peer = new Peer();
 
       peer.on('open', (id) => {
-        myId = id;
-        setupCard.classList.add('hidden');
-        chatCard.classList.remove('hidden');
-        currentRoomEl.textContent = roomName;
-        appendMessage('System', `Entered room "${roomName}" as ${asHost ? 'Host' : 'Member'}.`, 'system');
-
-        if (!asHost) {
-          // Joiners automatically initiate connection to the Host ID
-          connectToPeer(hostId);
-        }
+        peerId = id;
+        document.getElementById('my-id').textContent = id;
       });
 
       peer.on('connection', (conn) => {
-        setupConnection(conn);
-      });
-
-      peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-          alert('Room name already active! Try joining instead of creating.');
-        } else {
-          alert('PeerJS Error: ' + err.type);
-        }
+        setupHostConnection(conn);
       });
     }
 
-    function connectToPeer(targetId) {
-      if (connections[targetId] || targetId === myId) return;
-      const conn = peer.connect(targetId);
-      setupConnection(conn);
-    }
-
-    function setupConnection(conn) {
-      let isAuthenticated = false;
-
+    function setupHostConnection(conn) {
       conn.on('open', () => {
-        // Send PIN verification attempt immediately upon connection
-        conn.send({ type: 'AUTH_REQ', pin: roomPin, sender: myId });
+        connections[conn.peer] = conn;
+        
+        // Spawn remote player entity inside Host's physics engine
+        const randomColor = Math.floor(Math.random()*16777215);
+        createPlayer(conn.peer, 400, 200, randomColor);
+        
+        document.getElementById('net-status').textContent = `Host Mode (${Object.keys(connections).length + 1} Players)`;
       });
 
       conn.on('data', (data) => {
-        if (typeof data !== 'object') return;
-
-        // --- AUTH HANDSHAKE PROTOCOL ---
-        if (data.type === 'AUTH_REQ') {
-          if (roomPin && data.pin !== roomPin) {
-            conn.send({ type: 'AUTH_FAILED', reason: 'Incorrect Room PIN' });
-            setTimeout(() => conn.close(), 500);
-            return;
-          }
-          conn.send({ type: 'AUTH_OK' });
-          isAuthenticated = true;
-          connections[conn.peer] = conn;
-          updatePeerList();
-          broadcastPeerList();
-          appendMessage('System', `Peer ${conn.peer.substring(0, 6)} joined the mesh.`, 'system');
-          return;
-        }
-
-        if (data.type === 'AUTH_FAILED') {
-          alert('Access Denied: ' + (data.reason || 'Authentication failed.'));
-          conn.close();
-          return;
-        }
-
-        if (data.type === 'AUTH_OK') {
-          isAuthenticated = true;
-          connections[conn.peer] = conn;
-          updatePeerList();
-          broadcastPeerList();
-          return;
-        }
-
-        // Drop unauthenticated traffic
-        if (!isAuthenticated) return;
-
-        // --- MESH MESH DISCOVERY & PAYLOADS ---
-        if (data.type === 'PEER_LIST') {
-          data.peers.forEach(id => {
-            if (id !== myId && !connections[id]) connectToPeer(id);
-          });
-        } else if (data.type === 'CHAT') {
-          appendMessage(data.sender.substring(0, 6), data.text, 'received');
-        } else if (data.type === 'FILE') {
-          appendFileMessage(data.sender.substring(0, 6), data.fileName, data.fileData, 'received');
+        if (data.type === 'INPUT' && players[conn.peer]) {
+          players[conn.peer].inputs = data.inputs;
         }
       });
 
       conn.on('close', () => {
+        if (players[conn.peer]) {
+          World.remove(world, players[conn.peer].body);
+          app.stage.removeChild(players[conn.peer].graphics);
+          delete players[conn.peer];
+        }
         delete connections[conn.peer];
-        updatePeerList();
-        appendMessage('System', `Peer left the room.`, 'system');
       });
     }
 
-    // Share connection routing table across all peers
-    function broadcastPeerList() {
-      const knownPeers = [...Object.keys(connections), myId];
-      broadcast({ type: 'PEER_LIST', peers: knownPeers });
-    }
+    function joinRoom() {
+      const hostId = document.getElementById('join-id-input').value.trim();
+      if (!hostId) return alert('Enter a valid Host Peer ID');
 
-    function broadcast(payload) {
-      Object.values(connections).forEach(conn => {
-        if (conn.open) conn.send(payload);
+      isHost = false;
+      const conn = peer.connect(hostId);
+
+      conn.on('open', () => {
+        document.getElementById('net-status').textContent = 'Connected to Host!';
+        
+        // Listen for physics updates from Host
+        conn.on('data', (data) => {
+          if (data.type === 'WORLD_STATE') {
+            applyWorldState(data.state);
+          }
+        });
+
+        // Transmit Local Client Inputs to Host
+        setInterval(() => {
+          conn.send({
+            type: 'INPUT',
+            inputs: {
+              left: keys['a'] || keys['ArrowLeft'],
+              right: keys['d'] || keys['ArrowRight'],
+              jump: keys['w'] || keys['ArrowUp'],
+              grab: keys['e_trigger'],
+              throw: keys['click_trigger'],
+              mouse: mousePos
+            }
+          });
+          keys['e_trigger'] = false;
+          keys['click_trigger'] = false;
+        }, 1000 / 30);
       });
     }
 
-    function sendMessage() {
-      const text = messageInput.value.trim();
-      if (!text) return;
+    function broadcastWorldState() {
+      if (Object.keys(connections).length === 0) return;
 
-      broadcast({ type: 'CHAT', sender: myId, text: text });
-      appendMessage('You', text, 'sent');
-      messageInput.value = '';
-    }
-
-    function sendFile(input) {
-      const file = input.files[0];
-      if (!file) return;
-
-      // Restrict file size to ~15MB for browser DataChannel memory limits
-      if (file.size > 15 * 1024 * 1024) {
-        alert('File size exceeds 15MB limit for direct P2P channel.');
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const fileData = e.target.result;
-        broadcast({ type: 'FILE', sender: myId, fileName: file.name, fileData: fileData });
-        appendFileMessage('You', file.name, fileData, 'sent');
-        input.value = ''; // Reset input
+      const state = {
+        players: Object.values(players).map(p => ({
+          id: p.id, x: p.body.position.x, y: p.body.position.y,
+          color: p.color, isCrushed: p.isCrushed
+        })),
+        stones: stones.map(s => ({
+          x: s.body.position.x, y: s.body.position.y, angle: s.body.angle
+        }))
       };
-      reader.readAsDataURL(file);
+
+      Object.values(connections).forEach(c => c.send({ type: 'WORLD_STATE', state: state }));
     }
 
-    function appendMessage(sender, text, className = '') {
-      const div = document.createElement('div');
-      div.className = `msg ${className}`;
-      div.textContent = `${sender}: ${text}`;
-      chatBox.appendChild(div);
-      chatBox.scrollTop = chatBox.scrollHeight;
+    function applyWorldState(state) {
+      // Sync Remote Client Sprites visually using Host data
+      state.players.forEach(pData => {
+        if (!players[pData.id]) {
+          players[pData.id] = {
+            id: pData.id,
+            body: { position: { x: pData.x, y: pData.y } },
+            graphics: new PIXI.Graphics(),
+            color: pData.color,
+            isCrushed: pData.isCrushed
+          };
+          app.stage.addChild(players[pData.id].graphics);
+        } else {
+          players[pData.id].body.position.x = pData.x;
+          players[pData.id].body.position.y = pData.y;
+          players[pData.id].isCrushed = pData.isCrushed;
+        }
+      });
+
+      state.stones.forEach((sData, idx) => {
+        if (stones[idx]) {
+          stones[idx].body.position.x = sData.x;
+          stones[idx].body.position.y = sData.y;
+          stones[idx].body.angle = sData.angle;
+        }
+      });
     }
 
-    function appendFileMessage(sender, fileName, dataUrl, className = '') {
-      const div = document.createElement('div');
-      div.className = `msg ${className}`;
-      div.innerHTML = `<div><strong>${sender}:</strong> shared a file:</div>
-        <div class="file-card">📄 <a href="${dataUrl}" download="${fileName}">${fileName}</a></div>`;
-      chatBox.appendChild(div);
-      chatBox.scrollTop = chatBox.scrollHeight;
-    }
+    // ----------------------------------------------------------------
+    // 7. INPUT LISTENERS
+    // ----------------------------------------------------------------
+    function setupInputs() {
+      window.addEventListener('keydown', e => {
+        keys[e.key.toLowerCase()] = true;
+        if (e.key.toLowerCase() === 'e') {
+          keys['e_trigger'] = true;
+          if (isHost && players['local-host']) players['local-host'].inputs.grab = true;
+        }
+      });
 
-    function updatePeerList() {
-      const activeIds = Object.keys(connections);
-      peerCountEl.textContent = activeIds.length;
-      peerListEl.textContent = activeIds.length > 0 
-        ? activeIds.map(id => id.substring(0, 6)).join(', ') 
-        : 'None';
-    }
+      window.addEventListener('keyup', e => {
+        keys[e.key.toLowerCase()] = false;
+      });
 
-    messageInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') sendMessage();
-    });
+      const container = document.getElementById('canvas-container');
+      container.addEventListener('mousemove', e => {
+        const rect = container.getBoundingClientRect();
+        mousePos.x = e.clientX - rect.left;
+        mousePos.y = e.clientY - rect.top;
+        if (isHost && players['local-host']) players['local-host'].inputs.mouse = mousePos;
+      });
+
+      container.addEventListener('mousedown', e => {
+        if (e.button === 0) { // Left Click
+          keys['click_trigger'] = true;
+          if (isHost && players['local-host']) players['local-host'].inputs.throw = true;
+        } else if (e.button === 2) { // Right Click
+          keys['e_trigger'] = true;
+          if (isHost && players['local-host']) players['local-host'].inputs.grab = true;
+        }
+      });
+
+      container.addEventListener('contextmenu', e => e.preventDefault());
+
+      // Pass Keyboard Inputs directly to Local Player if acting as Host
+      app.ticker.add(() => {
+        if (isHost && players['local-host']) {
+          players['local-host'].inputs.left = keys['a'] || keys['arrowleft'];
+          players['local-host'].inputs.right = keys['d'] || keys['arrowright'];
+          players['local-host'].inputs.jump = keys['w'] || keys['arrowup'];
+        }
+      });
+    }
   </script>
 </body>
 </html>
