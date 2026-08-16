@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Stone Brawl</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html,body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#111; font-family: 'Segoe UI', Arial, sans-serif; touch-action:none; }
+  #gameCanvas { position:absolute; top:0; left:0; }
+
+  /* ---- MENU ---- */
+  #menu {
+    position:absolute; inset:0; z-index:50;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 50% 30%, #2c2c3a, #0c0c12 80%);
+  }
+  .panel {
+    background:rgba(20,20,28,0.85); border:1px solid #444; border-radius:14px;
+    padding:28px 30px; width:320px; text-align:center; color:#eee;
+    box-shadow:0 10px 40px rgba(0,0,0,0.6);
+  }
+  .panel h1 { margin:0 0 4px; font-size:28px; letter-spacing:2px; color:#f2c14e; text-shadow:0 0 12px rgba(242,193,78,.5); }
+  .panel p.sub { margin:0 0 20px; font-size:12px; color:#999; }
+  .panel input {
+    width:100%; padding:10px; margin:6px 0; border-radius:8px; border:1px solid #555;
+    background:#1c1c24; color:#fff; font-size:15px; text-align:center; letter-spacing:2px;
+  }
+  .panel button {
+    width:100%; padding:11px; margin:8px 0 0; border:none; border-radius:8px;
+    background:linear-gradient(180deg,#f2c14e,#d99e1f); color:#211a05; font-weight:700; font-size:15px;
+    cursor:pointer; letter-spacing:1px;
+  }
+  .panel button.secondary { background:linear-gradient(180deg,#4b5a6a,#333f4d); color:#eee; }
+  .divider { display:flex; align-items:center; color:#666; font-size:11px; margin:14px 0; }
+  .divider::before,.divider::after { content:""; flex:1; height:1px; background:#444; margin:0 8px;}
+  #menuStatus { min-height:18px; font-size:12px; color:#8fd28f; margin-top:8px; }
+
+  /* ---- HUD ---- */
+  #hud { position:absolute; inset:0; z-index:20; pointer-events:none; display:none; }
+  #topLeft { position:absolute; top:12px; left:12px; pointer-events:auto; }
+  .hpWrap { width:180px; }
+  .hpBarBg { width:100%; height:16px; background:#222; border-radius:8px; overflow:hidden; border:1px solid #000; }
+  .hpBarFill { height:100%; width:100%; background:linear-gradient(90deg,#e63946,#f2a154); transition:width .15s; }
+  .nameTag { color:#fff; font-size:12px; margin-bottom:3px; text-shadow:0 1px 2px #000; }
+  #roomTag { position:absolute; top:12px; left:50%; transform:translateX(-50%); pointer-events:auto;
+    background:rgba(0,0,0,0.45); color:#f2c14e; padding:5px 14px; border-radius:20px; font-size:13px; letter-spacing:2px; }
+  #feed { position:absolute; top:44px; right:12px; width:220px; text-align:right; pointer-events:none; }
+  #feed div { color:#eee; font-size:12px; background:rgba(0,0,0,0.35); margin-bottom:4px; padding:4px 8px; border-radius:6px; opacity:0.95; }
+
+  /* minimap */
+  #minimapWrap { position:absolute; top:12px; right:12px; pointer-events:auto; cursor:pointer; z-index:25; }
+  #minimap { display:block; background:rgba(15,15,20,0.75); border:2px solid rgba(242,193,78,0.6); border-radius:50%; transition: all .25s ease; }
+  #minimap.expanded { border-radius:12px; }
+
+  /* pickup / throw center prompt */
+  #centerPrompt { position:absolute; bottom:130px; left:50%; transform:translateX(-50%);
+    color:#fff; background:rgba(0,0,0,0.45); padding:6px 14px; border-radius:16px; font-size:13px;
+    pointer-events:none; opacity:0; transition:opacity .15s; }
+
+  /* joysticks */
+  .joyBase { position:absolute; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,0.08);
+    border:2px solid rgba(255,255,255,0.2); pointer-events:auto; }
+  .joyNub { position:absolute; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,0.35);
+    border:2px solid rgba(255,255,255,0.55); top:34px; left:34px; pointer-events:none; }
+  #moveJoy { bottom:26px; left:26px; }
+  #aimJoy { bottom:26px; right:26px; background:rgba(230,57,70,0.08); border-color:rgba(230,57,70,0.35); }
+  #aimJoy .joyNub { background:rgba(230,57,70,0.4); border-color:rgba(230,57,70,0.7); }
+
+  #deathOverlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(80,0,0,0.35); color:#fff; font-size:26px; letter-spacing:3px; z-index:40; pointer-events:none; text-shadow:0 2px 6px #000;}
+
+  #reconnectMsg { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); color:#f88; font-size:12px; z-index:60;}
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <div class="panel">
+    <h1>STONE BRAWL</h1>
+    <p class="sub">Physics stone-throwing arena · pick up, aim, hurl.</p>
+    <input id="nameInput" maxlength="12" placeholder="Your name" />
+    <button id="createBtn">CREATE ROOM</button>
+    <div class="divider">OR</div>
+    <input id="roomInput" maxlength="8" placeholder="ROOM CODE" style="text-transform:uppercase" />
+    <button id="joinBtn" class="secondary">JOIN ROOM</button>
+    <div id="menuStatus"></div>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="topLeft">
+    <div class="nameTag" id="myName">You</div>
+    <div class="hpWrap"><div class="hpBarBg"><div class="hpBarFill" id="hpFill"></div></div></div>
+  </div>
+  <div id="roomTag">ROOM: ----</div>
+  <div id="feed"></div>
+  <div id="minimapWrap"><canvas id="minimap" width="90" height="90"></canvas></div>
+  <div id="centerPrompt">Tap PICK to grab stone</div>
+
+  <div class="joyBase" id="moveJoy"><div class="joyNub" id="moveNub"></div></div>
+  <div class="joyBase" id="aimJoy"><div class="joyNub" id="aimNub"></div></div>
+</div>
+
+<div id="deathOverlay">YOU DIED — respawning…</div>
+<div id="reconnectMsg"></div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+
+<script>
+/* =====================================================================
+   CONFIG
+===================================================================== */
+const MAP_SIZE = 3600;
+const WALL_THICK = 60;
+const OBSTACLE_COUNT = 34;
+const STONE_COUNT = 46;
+const PLAYER_RADIUS = 20;
+const STONE_RADIUS = 11;
+const PLAYER_SPEED = 4.2;          // px per physics step (host authoritative)
+const STONE_THROW_MAX_SPEED = 22;
+const PICKUP_RANGE = 46;
+const SNAPSHOT_HZ = 22;
+const MAX_HP = 100;
+const COLORS = [0xff5e5e,0x5ea1ff,0x63e06b,0xf2c14e,0xd66bff,0x5ef0e0,0xff9d4d,0xb0ff5e];
+
+const SPAWNS = [
+  {x:220,y:220},{x:MAP_SIZE-220,y:220},{x:220,y:MAP_SIZE-220},{x:MAP_SIZE-220,y:MAP_SIZE-220},
+  {x:MAP_SIZE/2,y:220},{x:MAP_SIZE/2,y:MAP_SIZE-220},{x:220,y:MAP_SIZE/2},{x:MAP_SIZE-220,y:MAP_SIZE/2}
+];
+
+/* =====================================================================
+   SOUND (Howler + procedurally generated WAV tones, no external assets)
+===================================================================== */
+function makeToneWav(freq, duration, type, decay) {
+  const sr = 22050;
+  const n = Math.floor(sr * duration);
+  const buf = new ArrayBuffer(44 + n * 2);
+  const view = new DataView(buf);
+  function ws(o,s){ for(let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); }
+  ws(0,'RIFF'); view.setUint32(4, 36+n*2, true); ws(8,'WAVE'); ws(12,'fmt ');
+  view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true);
+  view.setUint32(24,sr,true); view.setUint32(28,sr*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+  ws(36,'data'); view.setUint32(40, n*2, true);
+  for (let i=0;i<n;i++){
+    const t = i/sr;
+    let s;
+    if (type==='noise') s = (Math.random()*2-1);
+    else s = Math.sin(2*Math.PI*freq*t + (type==='sweep'? -8*t*t:0));
+    const env = Math.exp(-decay*t);
+    const val = Math.max(-1,Math.min(1, s*env));
+    view.setInt16(44+i*2, val*32767, true);
+  }
+  let binary=''; const bytes = new Uint8Array(buf);
+  for (let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:audio/wav;base64,' + btoa(binary);
+}
+const SND = {
+  pickup: new Howl({ src:[makeToneWav(700,0.12,'sine',18)], volume:0.5 }),
+  throw:  new Howl({ src:[makeToneWav(220,0.18,'sweep',10)], volume:0.6 }),
+  impactWall: new Howl({ src:[makeToneWav(120,0.12,'noise',20)], volume:0.4 }),
+  hit:    new Howl({ src:[makeToneWav(90,0.25,'noise',9)], volume:0.8 }),
+  step:   new Howl({ src:[makeToneWav(300,0.05,'noise',30)], volume:0.15 }),
+  death:  new Howl({ src:[makeToneWav(150,0.5,'sweep',4)], volume:0.7 }),
+};
+
+/* =====================================================================
+   WORLD DATA GEN (deterministic-ish; host authoritative copy is sent to clients anyway)
+===================================================================== */
+function seededRand(seed){ let s = seed; return () => { s = (s*9301+49297)%233280; return s/233280; }; }
+
+function genWorld(seed){
+  const rand = seededRand(seed);
+  const obstacles = [];
+  for (let i=0;i<OBSTACLE_COUNT;i++){
+    const w = 80 + rand()*180, h = 80 + rand()*180;
+    const x = 300 + rand()*(MAP_SIZE-600);
+    const y = 300 + rand()*(MAP_SIZE-600);
+    obstacles.push({id:'o'+i, x, y, w, h});
+  }
+  const stones = [];
+  for (let i=0;i<STONE_COUNT;i++){
+    const x = 150 + rand()*(MAP_SIZE-300);
+    const y = 150 + rand()*(MAP_SIZE-300);
+    stones.push({id:'s'+i, x, y, vx:0, vy:0, held:null, thrown:false});
+  }
+  return {obstacles, stones};
+}
+
+/* =====================================================================
+   NETWORK LAYER (PeerJS)
+===================================================================== */
+const Net = {
+  peer:null, isHost:false, conns:[], hostConn:null, myId:null, roomCode:null,
+  onData:null, onPeerJoined:null, onPeerLeft:null,
+
+  makeRoomCode(){ const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<5;i++) s+=c[Math.floor(Math.random()*c.length)]; return s; },
+
+  hostRoom(cb, errCb){
+    this.isHost = true;
+    this.roomCode = this.makeRoomCode();
+    this.peer = new Peer('brawl-'+this.roomCode, { debug:0 });
+    this.peer.on('open', id => { this.myId = id; cb(this.roomCode); });
+    this.peer.on('error', e => errCb && errCb(e));
+    this.peer.on('connection', conn => {
+      conn.on('open', () => {
+        this.conns.push(conn);
+        this.onPeerJoined && this.onPeerJoined(conn);
+      });
+      conn.on('data', d => this.onData && this.onData(d, conn));
+      conn.on('close', () => {
+        this.conns = this.conns.filter(c=>c!==conn);
+        this.onPeerLeft && this.onPeerLeft(conn);
+      });
+    });
+  },
+
+  joinRoom(code, cb, errCb){
+    this.isHost = false;
+    this.roomCode = code;
+    this.peer = new Peer(undefined, { debug:0 });
+    this.peer.on('open', id => {
+      this.myId = id;
+      const conn = this.peer.connect('brawl-'+code, {reliable:true});
+      this.hostConn = conn;
+      conn.on('open', () => cb());
+      conn.on('data', d => this.onData && this.onData(d, conn));
+      conn.on('close', () => { document.getElementById('reconnectMsg').textContent = 'Lost connection to host.'; });
+      conn.on('error', e => errCb && errCb(e));
+    });
+    this.peer.on('error', e => errCb && errCb(e));
+  },
+
+  broadcast(obj){
+    const s = obj;
+    for (const c of this.conns) { if (c.open) c.send(s); }
+  },
+  sendToHost(obj){
+    if (this.hostConn && this.hostConn.open) this.hostConn.send(obj);
+  }
+};
+
+/* =====================================================================
+   GAME STATE (shared shape used by host + clients)
+===================================================================== */
+const Game = {
+  myId:null, myName:'Player',
+  players:{},       // id -> {x,y,angle,hp,carrying,color,name,vx,vy,tx,ty,dead}
+  stones:{},        // id -> {x,y,vx,vy,held,thrown}
+  obstacles:[],
+  world:null,
+  running:false,
+};
+
+/* =====================================================================
+   PIXI SETUP
+===================================================================== */
+const app = new PIXI.Application();
+let pixiReady = false;
+async function initPixi(){
+  await app.init({ canvas: document.getElementById('gameCanvas'), resizeTo: window, background:0x1c2b1c, antialias:true });
+  pixiReady = true;
+}
+
+const worldLayer = new PIXI.Container();
+const groundLayer = new PIXI.Container();
+const obstacleLayer = new PIXI.Container();
+const stoneLayer = new PIXI.Container();
+const playerLayer = new PIXI.Container();
+const fxLayer = new PIXI.Container();
+worldLayer.addChild(groundLayer, obstacleLayer, stoneLayer, playerLayer, fxLayer);
+
+const aimGfx = new PIXI.Graphics();
+fxLayer.addChild(aimGfx);
+
+function buildGround(){
+  const g = new PIXI.Graphics();
+  const tile = 180;
+  g.rect(0,0,MAP_SIZE,MAP_SIZE).fill(0x2a3d24);
+  for (let x=0;x<MAP_SIZE;x+=tile){
+    for (let y=0;y<MAP_SIZE;y+=tile){
+      if (((x/tile)+(y/tile))%2===0) g.rect(x,y,tile,tile).fill(0x30452a);
+    }
+  }
+  g.rect(0,0,MAP_SIZE,WALL_THICK).fill(0x151d12);
+  g.rect(0,MAP_SIZE-WALL_THICK,MAP_SIZE,WALL_THICK).fill(0x151d12);
+  g.rect(0,0,WALL_THICK,MAP_SIZE).fill(0x151d12);
+  g.rect(MAP_SIZE-WALL_THICK,0,WALL_THICK,MAP_SIZE).fill(0x151d12);
+  groundLayer.addChild(g);
+}
+
+function buildObstacles(obstacles){
+  obstacleLayer.removeChildren();
+  for (const o of obstacles){
+    const g = new PIXI.Graphics();
+    g.roundRect(-o.w/2,-o.h/2,o.w,o.h,8).fill(0x5a5148).stroke({width:3,color:0x33302a});
+    g.x = o.x; g.y = o.y;
+    obstacleLayer.addChild(g);
+  }
+}
+
+const stoneSprites = {};
+function ensureStoneSprite(id){
+  if (stoneSprites[id]) return stoneSprites[id];
+  const g = new PIXI.Graphics();
+  g.circle(0,0,STONE_RADIUS).fill(0x9a9a92).stroke({width:2,color:0x55524c});
+  g.circle(-3,-3,3).fill(0xb5b5ac);
+  stoneLayer.addChild(g);
+  stoneSprites[id] = g;
+  return g;
+}
+
+const playerSprites = {};
+function ensurePlayerSprite(id, color, name){
+  if (playerSprites[id]) return playerSprites[id];
+  const c = new PIXI.Container();
+  const body = new PIXI.Graphics();
+  body.circle(0,0,PLAYER_RADIUS).fill(color).stroke({width:3,color:0x111111});
+  const dir = new PIXI.Graphics();
+  dir.moveTo(0,0).lineTo(PLAYER_RADIUS+10,0).stroke({width:4,color:0xffffff,alpha:0.8});
+  const carried = new PIXI.Graphics();
+  carried.circle(PLAYER_RADIUS+14,0,STONE_RADIUS*0.8).fill(0x9a9a92).stroke({width:2,color:0x55524c});
+  carried.visible = false;
+  const label = new PIXI.Text({text:name, style:{fill:0xffffff, fontSize:12, stroke:{color:0x000000,width:3}}});
+  label.anchor.set(0.5); label.y = -PLAYER_RADIUS-14;
+  const hpBg = new PIXI.Graphics(); hpBg.roundRect(-20,-PLAYER_RADIUS-10,40,6,3).fill(0x000000);
+  const hpFill = new PIXI.Graphics(); hpFill.roundRect(-19,-PLAYER_RADIUS-9,38,4,2).fill(0x4de04d);
+  c.addChild(dir, body, carried, hpBg, hpFill, label);
+  c._body=body; c._carried=carried; c._label=label; c._hpFill=hpFill; c._dir=dir;
+  playerLayer.addChild(c);
+  playerSprites[id]=c;
+  return c;
+}
+
+/* =====================================================================
+   HOST-SIDE MATTER PHYSICS (authoritative simulation)
+===================================================================== */
+let engine, world;
+const hostBodies = { players:{}, stones:{} };
+
+function hostInitPhysics(){
+  engine = Matter.Engine.create({ gravity:{x:0,y:0} });
+  world = engine.world;
+  const walls = [
+    Matter.Bodies.rectangle(MAP_SIZE/2,-WALL_THICK/2,MAP_SIZE,WALL_THICK,{isStatic:true}),
+    Matter.Bodies.rectangle(MAP_SIZE/2,MAP_SIZE+WALL_THICK/2,MAP_SIZE,WALL_THICK,{isStatic:true}),
+    Matter.Bodies.rectangle(-WALL_THICK/2,MAP_SIZE/2,WALL_THICK,MAP_SIZE,{isStatic:true}),
+    Matter.Bodies.rectangle(MAP_SIZE+WALL_THICK/2,MAP_SIZE/2,WALL_THICK,MAP_SIZE,{isStatic:true}),
+  ];
+  Matter.World.add(world, walls);
+  for (const o of Game.obstacles){
+    const b = Matter.Bodies.rectangle(o.x,o.y,o.w,o.h,{isStatic:true, label:'obstacle', restitution:0.4});
+    Matter.World.add(world, b);
+  }
+  for (const sid in Game.stones){
+    const s = Game.stones[sid];
+    const b = Matter.Bodies.circle(s.x,s.y,STONE_RADIUS,{ label:'stone', restitution:0.45, friction:0.02, frictionAir:0.02, density:0.004 });
+    b.gameId = sid;
+    hostBodies.stones[sid] = b;
+    Matter.World.add(world, b);
+  }
+  Matter.Events.on(engine, 'collisionStart', evt => {
+    for (const pair of evt.pairs){
+      const a = pair.bodyA, b = pair.bodyB;
+      handleStoneCollision(a,b); handleStoneCollision(b,a);
+    }
+  });
+}
+
+function handleStoneCollision(stoneBody, otherBody){
+  if (stoneBody.label!=='stone') return;
+  const sid = stoneBody.gameId;
+  const s = Game.stones[sid];
+  if (!s || s.held) return;
+  const speed = Math.hypot(stoneBody.velocity.x, stoneBody.velocity.y);
+  if (otherBody.label==='player' && s.thrown && otherBody.gameId !== s.lastThrower){
+    const dmg = Math.max(4, Math.min(42, speed*3.2));
+    const p = Game.players[otherBody.gameId];
+    if (p && !p.dead){
+      p.hp -= dmg;
+      Net.broadcast({t:'fx', kind:'hit', x:otherBody.position.x, y:otherBody.position.y});
+      broadcastFeed(`${p.name} hit for ${dmg.toFixed(0)}`);
+      if (p.hp<=0) hostKillPlayer(otherBody.gameId, s.lastThrower);
+    }
+    s.thrown=false;
+  } else if (otherBody.label==='obstacle' && speed>2){
+    Net.broadcast({t:'fx', kind:'wallhit', x:stoneBody.position.x, y:stoneBody.position.y});
+  }
+}
+
+function hostAddPlayer(id, name){
+  const spawn = SPAWNS[Object.keys(Game.players).length % SPAWNS.length];
+  const color = COLORS[Object.keys(Game.players).length % COLORS.length];
+  Game.players[id] = { x:spawn.x, y:spawn.y, angle:0, hp:MAX_HP, carrying:null, color, name, vx:0, vy:0, dead:false, kills:0 };
+  const b = Matter.Bodies.circle(spawn.x, spawn.y, PLAYER_RADIUS, { label:'player', friction:0, frictionAir:0.25, restitution:0.3, density:0.01 });
+  b.gameId = id;
+  hostBodies.players[id] = b;
+  Matter.World.add(world, b);
+}
+
+function hostRemovePlayer(id){
+  const b = hostBodies.players[id];
+  if (b) Matter.World.remove(world, b);
+  delete hostBodies.players[id];
+  delete Game.players[id];
+}
+
+function hostKillPlayer(id, killerId){
+  const p = Game.players[id]; if (!p) return;
+  p.dead = true; p.hp = 0;
+  broadcastFeed(`${(Game.players[killerId]&&Game.players[killerId].name)||'Someone'} defeated ${p.name}`);
+  if (Game.players[killerId]) Game.players[killerId].kills++;
+  if (p.carrying){ Game.stones[p.carrying].held=null; p.carrying=null; }
+  setTimeout(()=>{
+    if (!Game.players[id]) return;
+    const spawn = SPAWNS[Math.floor(Math.random()*SPAWNS.length)];
+    p.hp = MAX_HP; p.dead=false;
+    const b = hostBodies.players[id];
+    Matter.Body.setPosition(b, spawn); Matter.Body.setVelocity(b,{x:0,y:0});
+  }, 1800);
+}
+
+function broadcastFeed(msg){
+  Net.broadcast({t:'feed', msg});
+  if (Net.isHost) pushFeed(msg);
+}
+
+const hostInputs = {}; // id -> {mx,my, aimx,aimy, power, pickup, throw}
+
+function hostApplyInput(id, inp){ hostInputs[id] = inp; }
+
+function hostTick(){
+  for (const id in Game.players){
+    const p = Game.players[id]; const b = hostBodies.players[id];
+    if (!b || p.dead) continue;
+    const inp = hostInputs[id] || {mx:0,my:0};
+    const mag = Math.hypot(inp.mx, inp.my);
+    if (mag>0.05){
+      const nx = inp.mx/Math.max(mag,1), ny = inp.my/Math.max(mag,1);
+      const spd = Math.min(mag,1)*PLAYER_SPEED;
+      Matter.Body.setVelocity(b, {x:nx*spd*3.2, y:ny*spd*3.2});
+      p.angle = Math.atan2(ny,nx);
+    } else {
+      Matter.Body.setVelocity(b, {x:b.velocity.x*0.8, y:b.velocity.y*0.8});
+    }
+    // pickup
+    if (inp.pickup && !p.carrying){
+      for (const sid in Game.stones){
+        const s = Game.stones[sid];
+        if (s.held || s.thrown) continue;
+        if (Math.hypot(s.x-b.position.x, s.y-b.position.y) < PICKUP_RANGE){
+          s.held = id; p.carrying = sid;
+          const sb = hostBodies.stones[sid];
+          Matter.Body.setStatic(sb, true);
+          Net.broadcast({t:'fx', kind:'pickup', x:b.position.x, y:b.position.y});
+          break;
+        }
+      }
+    }
+    // update carried stone position (follow player)
+    if (p.carrying){
+      const sb = hostBodies.stones[p.carrying];
+      if (sb) Matter.Body.setPosition(sb, { x:b.position.x + Math.cos(p.angle)*(PLAYER_RADIUS+14), y:b.position.y + Math.sin(p.angle)*(PLAYER_RADIUS+14) });
+    }
+    // throw
+    if (inp.throwNow && p.carrying){
+      const sid = p.carrying;
+      const s = Game.stones[sid]; const sb = hostBodies.stones[sid];
+      Matter.Body.setStatic(sb,false);
+      const power = Math.min(1, inp.power||0.6);
+      const ax = inp.aimx||1, ay=inp.aimy||0;
+      const alen = Math.hypot(ax,ay)||1;
+      Matter.Body.setPosition(sb, { x:b.position.x + (ax/alen)*(PLAYER_RADIUS+16), y:b.position.y + (ay/alen)*(PLAYER_RADIUS+16) });
+      Matter.Body.setVelocity(sb, { x:(ax/alen)*STONE_THROW_MAX_SPEED*power, y:(ay/alen)*STONE_THROW_MAX_SPEED*power });
+      s.held=null; s.thrown=true; s.lastThrower=id;
+      p.carrying=null;
+      Net.broadcast({t:'fx', kind:'throw', x:b.position.x, y:b.position.y});
+      inp.throwNow=false;
+    }
+    p.x=b.position.x; p.y=b.position.y;
+  }
+  for (const sid in Game.stones){
+    const s = Game.stones[sid]; const sb = hostBodies.stones[sid];
+    if (!sb) continue;
+    s.x=sb.position.x; s.y=sb.position.y; s.vx=sb.velocity.x; s.vy=sb.velocity.y;
+    if (s.thrown && Math.hypot(s.vx,s.vy) < 0.4) s.thrown=false;
+  }
+}
+
+let lastSnapshot=0;
+function hostMaybeBroadcastSnapshot(now){
+  if (now - lastSnapshot < 1000/SNAPSHOT_HZ) return;
+  lastSnapshot = now;
+  const snap = { t:'state', players:{}, stones:{} };
+  for (const id in Game.players){
+    const p = Game.players[id];
+    snap.players[id] = {x:p.x,y:p.y,angle:p.angle,hp:p.hp,carrying:p.carrying,color:p.color,name:p.name,dead:p.dead,kills:p.kills};
+  }
+  for (const sid in Game.stones){
+    const s = Game.stones[sid];
+    snap.stones[sid] = {x:s.x,y:s.y,held:s.held,thrown:s.thrown};
+  }
+  Net.broadcast(snap);
+  applySnapshotLocal(snap); // host applies to itself too
+}
+
+/* =====================================================================
+   CLIENT-SIDE STATE APPLY (used by both host-local render and remote clients)
+===================================================================== */
+function applySnapshotLocal(snap){
+  for (const id in snap.players){
+    const sp = snap.players[id];
+    if (!Game.players[id]) Game.players[id] = {...sp, tx:sp.x, ty:sp.y};
+    const p = Game.players[id];
+    p.tx = sp.x; p.ty = sp.y; p.angle = sp.angle; p.hp = sp.hp; p.carrying = sp.carrying;
+    p.color = sp.color; p.name = sp.name; p.dead = sp.dead; p.kills = sp.kills;
+    if (p.x===undefined){ p.x=sp.x; p.y=sp.y; }
+  }
+  for (const sid in snap.stones){
+    const ss = snap.stones[sid];
+    if (!Game.stones[sid]) Game.stones[sid] = {...ss};
+    const s = Game.stones[sid];
+    s.tx = ss.x; s.ty = ss.y; s.held = ss.held; s.thrown = ss.thrown;
+    if (s.x===undefined){ s.x=ss.x; s.y=ss.y; }
+  }
+}
+
+/* =====================================================================
+   INPUT (virtual joysticks + mouse/touch + keyboard fallback)
+===================================================================== */
+const InputState = { mx:0,my:0, aimx:1, aimy:0, aiming:false, power:0, pickupHeld:false, wantThrow:false };
+const keys = {};
+window.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
+window.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
+
+function setupJoystick(baseEl, nubEl, onMove, onEnd, isAim){
+  let active=false, touchId=null, cx=0, cy=0;
+  const maxR = 45;
+  function start(x,y,id){
+    active=true; touchId=id;
+    const r = baseEl.getBoundingClientRect();
+    cx = r.left + r.width/2; cy = r.top + r.height/2;
+  }
+  function move(x,y){
+    if (!active) return;
+    let dx=x-cx, dy=y-cy;
+    const d = Math.hypot(dx,dy);
+    const clamped = Math.min(d,maxR);
+    const nx = d>0? dx/d:0, ny = d>0? dy/d:0;
+    nubEl.style.left = (34+nx*clamped)+'px';
+    nubEl.style.top = (34+ny*clamped)+'px';
+    onMove(nx*(clamped/maxR), ny*(clamped/maxR), clamped/maxR);
+  }
+  function end(){
+    if (!active) return;
+    active=false; touchId=null;
+    nubEl.style.left='34px'; nubEl.style.top='34px';
+    onEnd && onEnd();
+  }
+  baseEl.addEventListener('pointerdown', e=>{ baseEl.setPointerCapture(e.pointerId); start(e.clientX,e.clientY,e.pointerId); move(e.clientX,e.clientY); });
+  baseEl.addEventListener('pointermove', e=>{ if(active) move(e.clientX,e.clientY); });
+  baseEl.addEventListener('pointerup', end);
+  baseEl.addEventListener('pointercancel', end);
+}
+
+setupJoystick(document.getElementById('moveJoy'), document.getElementById('moveNub'), (nx,ny)=>{
+  InputState.mx = nx; InputState.my = ny;
+}, ()=>{ InputState.mx=0; InputState.my=0; });
+
+setupJoystick(document.getElementById('aimJoy'), document.getElementById('aimNub'), (nx,ny,p)=>{
+  if (Math.hypot(nx,ny) > 0.15){ InputState.aimx = nx; InputState.aimy = ny; }
+  InputState.aiming = true; InputState.power = p;
+}, ()=>{
+  if (InputState.aiming){ InputState.wantThrow = true; }
+  InputState.aiming = false;
+});
+
+document.getElementById('centerPrompt').addEventListener('pointerdown', ()=>{ InputState.pickupHeld = true; });
+document.getElementById('centerPrompt').addEventListener('pointerup', ()=>{ InputState.pickupHeld = false; });
+
+/* minimap expand */
+let minimapExpanded=false;
+document.getElementById('minimapWrap').addEventListener('click', ()=>{
+  minimapExpanded=!minimapExpanded;
+  const mm = document.getElementById('minimap');
+  if (minimapExpanded){ mm.width=260; mm.height=260; mm.classList.add('expanded'); }
+  else { mm.width=90; mm.height=90; mm.classList.remove('expanded'); }
+});
+
+/* =====================================================================
+   FEED / UI HELPERS
+===================================================================== */
+function pushFeed(msg){
+  const feed = document.getElementById('feed');
+  const el = document.createElement('div'); el.textContent = msg;
+  feed.appendChild(el);
+  setTimeout(()=> el.remove(), 4500);
+  while (feed.children.length>5) feed.removeChild(feed.firstChild);
+}
+
+/* =====================================================================
+   MENU / CONNECTION FLOW
+===================================================================== */
+const menuStatus = document.getElementById('menuStatus');
+document.getElementById('createBtn').addEventListener('click', ()=>{
+  Game.myName = document.getElementById('nameInput').value.trim() || 'Player'+Math.floor(Math.random()*99);
+  menuStatus.textContent = 'Creating room…';
+  Net.hostRoom(code=>{
+    menuStatus.textContent = 'Room ready: '+code;
+    startAsHost();
+  }, err=>{ menuStatus.textContent = 'Error: '+err.type; });
+});
+document.getElementById('joinBtn').addEventListener('click', ()=>{
+  const code = document.getElementById('roomInput').value.trim().toUpperCase();
+  if (!code){ menuStatus.textContent='Enter a room code'; return; }
+  Game.myName = document.getElementById('nameInput').value.trim() || 'Player'+Math.floor(Math.random()*99);
+  menuStatus.textContent = 'Connecting…';
+  Net.joinRoom(code, ()=>{
+    menuStatus.textContent = 'Connected!';
+    startAsClient(code);
+  }, err=>{ menuStatus.textContent = 'Could not connect: '+err.type; });
+});
+
+/* =====================================================================
+   HOST START
+===================================================================== */
+async function startAsHost(){
+  if (!pixiReady) await initPixi();
+  const wd = genWorld(Date.now()%100000);
+  Game.obstacles = wd.obstacles;
+  for (const s of wd.stones) Game.stones[s.id] = s;
+  hostInitPhysics();
+  Game.myId = Net.myId;
+  hostAddPlayer(Game.myId, Game.myName);
+
+  Net.onPeerJoined = (conn)=>{
+    hostAddPlayer(conn.peer, 'Player'+Object.keys(Game.players).length);
+    conn.send({ t:'init', obstacles: Game.obstacles, players: Game.players, stones: Game.stones, yourId: conn.peer, roomCode: Net.roomCode });
+    broadcastFeed((Game.players[conn.peer]?.name||'A player')+' joined the arena');
+  };
+  Net.onPeerLeft = (conn)=>{
+    broadcastFeed((Game.players[conn.peer]?.name||'A player')+' left');
+    hostRemovePlayer(conn.peer);
+  };
+  Net.onData = (d, conn)=>{
+    if (d.t==='input') hostApplyInput(conn.peer, d);
+    if (d.t==='rename' && Game.players[conn.peer]) Game.players[conn.peer].name = d.name;
+  };
+
+  buildWorldVisuals();
+  enterGame(Net.roomCode);
+  startLoop(true);
+}
+
+/* =====================================================================
+   CLIENT START
+===================================================================== */
+async function startAsClient(code){
+  if (!pixiReady) await initPixi();
+  let initReceived=false;
+  Net.onData = (d)=>{
+    if (d.t==='init'){
+      Game.obstacles = d.obstacles;
+      Game.myId = d.yourId;
+      for (const id in d.players) Game.players[id] = {...d.players[id], tx:d.players[id].x, ty:d.players[id].y};
+      for (const sid in d.stones) Game.stones[sid] = {...d.stones[sid], tx:d.stones[sid].x, ty:d.stones[sid].y};
+      buildWorldVisuals();
+      enterGame(code);
+      startLoop(false);
+      initReceived=true;
+    } else if (d.t==='state'){
+      applySnapshotLocal(d);
+    } else if (d.t==='feed'){
+      pushFeed(d.msg);
+    } else if (d.t==='fx'){
+      spawnFx(d.kind, d.x, d.y);
+    }
+  };
+}
+
+/* =====================================================================
+   BUILD VISUALS, ENTER GAME
+===================================================================== */
+function buildWorldVisuals(){
+  buildGround();
+  buildObstacles(Game.obstacles);
+  app.stage.addChild(worldLayer);
+}
+
+function enterGame(code){
+  document.getElementById('menu').style.display='none';
+  document.getElementById('hud').style.display='block';
+  document.getElementById('roomTag').textContent = 'ROOM: '+code;
+  document.getElementById('myName').textContent = Game.myName;
+  Game.running = true;
+}
+
+/* =====================================================================
+   FX (particles / sound triggers)
+===================================================================== */
+function spawnFx(kind, x, y){
+  if (kind==='hit'){ SND.hit.play(); burst(x,y,0xff5e5e,14); }
+  else if (kind==='throw'){ SND.throw.play(); }
+  else if (kind==='pickup'){ SND.pickup.play(); }
+  else if (kind==='wallhit'){ SND.impactWall.play(); burst(x,y,0xcccccc,6); }
+}
+function burst(x,y,color,n){
+  for (let i=0;i<n;i++){
+    const g = new PIXI.Graphics();
+    g.circle(0,0,3+Math.random()*3).fill(color);
+    g.x=x; g.y=y;
+    const ang = Math.random()*Math.PI*2, spd = 2+Math.random()*4;
+    g._vx = Math.cos(ang)*spd; g._vy = Math.sin(ang)*spd; g._life=30;
+    fxLayer.addChild(g);
+    fxParticles.push(g);
+  }
+}
+const fxParticles = [];
+
+/* =====================================================================
+   MAIN LOOP
+===================================================================== */
+let lastInputSend=0;
+function startLoop(isHost){
+  app.ticker.add(()=>{
+    if (!Game.running) return;
+    const now = performance.now();
+
+    // gather local input
+    let mx = InputState.mx, my = InputState.my;
+    if (keys['w']||keys['arrowup']) my -= 1;
+    if (keys['s']||keys['arrowdown']) my += 1;
+    if (keys['a']||keys['arrowleft']) mx -= 1;
+    if (keys['d']||keys['arrowright']) mx += 1;
+
+    const localInput = {
+      t:'input', mx, my,
+      aimx: InputState.aimx, aimy: InputState.aimy,
+      power: InputState.power,
+      pickup: InputState.pickupHeld,
+      throwNow: InputState.wantThrow
+    };
+    InputState.wantThrow = false;
+
+    if (isHost){
+      hostApplyInput(Game.myId, localInput);
+      Matter.Engine.update(engine, 1000/60);
+      hostTick();
+      hostMaybeBroadcastSnapshot(now);
+    } else {
+      if (now - lastInputSend > 1000/30){ Net.sendToHost(localInput); lastInputSend = now; }
+      // local prediction for own player
+      const me = Game.players[Game.myId];
+      if (me && !me.dead){
+        const mag = Math.hypot(mx,my);
+        if (mag>0.05){
+          const nx=mx/Math.max(mag,1), ny=my/Math.max(mag,1);
+          me.x += nx*Math.min(mag,1)*PLAYER_SPEED*3.2*(1/60)*16.6;
+          me.y += ny*Math.min(mag,1)*PLAYER_SPEED*3.2*(1/60)*16.6;
+          me.angle = Math.atan2(ny,nx);
+        }
+        if (me.tx!==undefined){ me.x += (me.tx-me.x)*0.12; me.y += (me.ty-me.y)*0.12; }
+      }
+      for (const id in Game.players){
+        if (id===Game.myId) continue;
+        const p = Game.players[id];
+        if (p.tx===undefined) continue;
+        p.x += (p.tx-p.x)*0.25; p.y += (p.ty-p.y)*0.25;
+      }
+      for (const sid in Game.stones){
+        const s = Game.stones[sid];
+        if (s.tx===undefined) continue;
+        s.x += (s.tx-s.x)*0.35; s.y += (s.ty-s.y)*0.35;
+      }
+    }
+
+    render();
+  });
+}
+
+/* =====================================================================
+   RENDER
+===================================================================== */
+function render(){
+  const me = Game.players[Game.myId];
+  if (!me) return;
+
+  // camera
+  const w = app.renderer.width, h = app.renderer.height;
+  worldLayer.x = w/2 - me.x;
+  worldLayer.y = h/2 - me.y;
+
+  // players
+  for (const id in Game.players){
+    const p = Game.players[id];
+    const spr = ensurePlayerSprite(id, p.color, p.name);
+    spr.x = p.x; spr.y = p.y;
+    spr._dir.rotation = p.angle;
+    spr.alpha = p.dead ? 0.25 : 1;
+    spr._carried.visible = !!p.carrying;
+    if (p.carrying) spr._carried.rotation = p.angle;
+    const hpPct = Math.max(0,p.hp)/MAX_HP;
+    spr._hpFill.width = 38*hpPct;
+    spr._hpFill.tint = hpPct>0.5?0x4de04d: hpPct>0.25?0xf2c14e:0xe63946;
+  }
+  for (const id in playerSprites){ if (!Game.players[id]){ playerLayer.removeChild(playerSprites[id]); delete playerSprites[id]; } }
+
+  // stones
+  for (const sid in Game.stones){
+    const s = Game.stones[sid];
+    const spr = ensureStoneSprite(sid);
+    spr.visible = !s.held;
+    spr.x = s.x; spr.y = s.y;
+  }
+
+  // aim line (only for local player, only while aiming & carrying)
+  aimGfx.clear();
+  if (me.carrying && InputState.aiming){
+    const len = 60 + InputState.power*380;
+    const ax = InputState.aimx, ay = InputState.aimy;
+    const alen = Math.hypot(ax,ay)||1;
+    const dx = ax/alen, dy = ay/alen;
+    const segs = 14;
+    for (let i=0;i<segs;i++){
+      if (i%2===0){
+        const t0=i/segs, t1=(i+0.6)/segs;
+        aimGfx.moveTo(me.x+dx*len*t0, me.y+dy*len*t0)
+              .lineTo(me.x+dx*len*t1, me.y+dy*len*t1)
+              .stroke({width:3, color:0xff5e5e, alpha:0.85});
+      }
+    }
+    aimGfx.circle(me.x+dx*len, me.y+dy*len, 5).fill({color:0xff5e5e, alpha:0.9});
+  }
+
+  // fx particles
+  for (let i=fxParticles.length-1;i>=0;i--){
+    const g = fxParticles[i];
+    g.x += g._vx; g.y += g._vy; g._vx*=0.9; g._vy*=0.9; g._life--;
+    g.alpha = g._life/30;
+    if (g._life<=0){ fxLayer.removeChild(g); fxParticles.splice(i,1); }
+  }
+
+  // HUD: hp bar, prompt, minimap
+  document.getElementById('hpFill').style.width = Math.max(0,me.hp)+'%';
+  const prompt = document.getElementById('centerPrompt');
+  let nearStone = false;
+  if (!me.carrying){
+    for (const sid in Game.stones){
+      const s = Game.stones[sid];
+      if (!s.held && !s.thrown && Math.hypot(s.x-me.x,s.y-me.y)<PICKUP_RANGE){ nearStone=true; break; }
+    }
+  }
+  prompt.style.opacity = (nearStone && !me.carrying) ? '1' : '0';
+  prompt.textContent = me.carrying ? '' : 'Walk near a stone & hold PICK';
+
+  document.getElementById('deathOverlay').style.display = me.dead ? 'flex':'none';
+
+  drawMinimap(me);
+}
+
+function drawMinimap(me){
+  const mm = document.getElementById('minimap');
+  const ctx = mm.getContext('2d');
+  const size = mm.width;
+  ctx.clearRect(0,0,size,size);
+  const scale = size/MAP_SIZE;
+  ctx.fillStyle = '#1e2a1a';
+  if (minimapExpanded) ctx.fillRect(0,0,size,size);
+  else { ctx.save(); ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.clip(); ctx.fillRect(0,0,size,size); ctx.restore(); }
+  ctx.fillStyle = '#4a4038';
+  for (const o of Game.obstacles) ctx.fillRect(o.x*scale-1, o.y*scale-1, Math.max(2,o.w*scale), Math.max(2,o.h*scale));
+  ctx.fillStyle = '#c9c9c0';
+  for (const sid in Game.stones){ const s=Game.stones[sid]; if(!s.held) { ctx.beginPath(); ctx.arc(s.x*scale, s.y*scale, 1.5, 0, 7); ctx.fill(); } }
+  for (const id in Game.players){
+    const p = Game.players[id];
+    ctx.fillStyle = id===Game.myId ? '#f2c14e' : '#'+p.color.toString(16).padStart(6,'0');
+    ctx.beginPath(); ctx.arc(p.x*scale, p.y*scale, id===Game.myId?4:3, 0, 7); ctx.fill();
+  }
+}
+
+/* keep canvas sized */
+window.addEventListener('resize', ()=>{ if (pixiReady) app.renderer.resize(window.innerWidth, window.innerHeight); });
+</script>
+</body>
+</html>
